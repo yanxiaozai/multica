@@ -486,6 +486,21 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueIntegration struct {
+	ID                         pgtype.UUID        `json:"id"`
+	WorkspaceID                pgtype.UUID        `json:"workspace_id"`
+	Provider                   string             `json:"provider"`
+	Name                       string             `json:"name"`
+	BaseUrl                    string             `json:"base_url"`
+	EncryptedToken             string             `json:"encrypted_token"`
+	DefaultIssueSkillID        pgtype.UUID        `json:"default_issue_skill_id"`
+	PollingEnabled             bool               `json:"polling_enabled"`
+	DefaultPollIntervalSeconds int32              `json:"default_poll_interval_seconds"`
+	Config                     []byte             `json:"config"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueLabel struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -520,6 +535,26 @@ type IssueSubscriber struct {
 	UserID    pgtype.UUID        `json:"user_id"`
 	Reason    string             `json:"reason"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type IssueSyncConfig struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	IntegrationID        pgtype.UUID        `json:"integration_id"`
+	ScopeType            string             `json:"scope_type"`
+	ScopeID              pgtype.UUID        `json:"scope_id"`
+	RemoteProjectRef     string             `json:"remote_project_ref"`
+	SyncEnabled          bool               `json:"sync_enabled"`
+	PollIntervalSeconds  pgtype.Int4        `json:"poll_interval_seconds"`
+	StateMapping         []byte             `json:"state_mapping"`
+	AutoAssignEnabled    bool               `json:"auto_assign_enabled"`
+	DefaultAssigneeType  pgtype.Text        `json:"default_assignee_type"`
+	DefaultAssigneeID    pgtype.UUID        `json:"default_assignee_id"`
+	LastPollAt           pgtype.Timestamptz `json:"last_poll_at"`
+	LastSuccessfulPollAt pgtype.Timestamptz `json:"last_successful_poll_at"`
+	LastError            string             `json:"last_error"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IssueToLabel struct {
