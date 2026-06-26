@@ -263,8 +263,8 @@ func (f *fakeQueries) UpdateIssueIntegration(context.Context, db.UpdateIssueInte
 	return db.IssueIntegration{}, errors.New("not implemented")
 }
 
-func (f *fakeQueries) DeleteIssueIntegration(context.Context, db.DeleteIssueIntegrationParams) error {
-	return errors.New("not implemented")
+func (f *fakeQueries) DeleteIssueIntegration(context.Context, db.DeleteIssueIntegrationParams) (pgtype.UUID, error) {
+	return pgtype.UUID{}, errors.New("not implemented")
 }
 
 type fakeSecretBox struct{}

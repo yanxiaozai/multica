@@ -127,9 +127,10 @@ func (q *Queries) CreateIssueSyncConfig(ctx context.Context, arg CreateIssueSync
 	return i, err
 }
 
-const deleteIssueIntegration = `-- name: DeleteIssueIntegration :exec
+const deleteIssueIntegration = `-- name: DeleteIssueIntegration :one
 DELETE FROM issue_integration
 WHERE id = $1 AND workspace_id = $2
+RETURNING id
 `
 
 type DeleteIssueIntegrationParams struct {
@@ -137,14 +138,17 @@ type DeleteIssueIntegrationParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) DeleteIssueIntegration(ctx context.Context, arg DeleteIssueIntegrationParams) error {
-	_, err := q.db.Exec(ctx, deleteIssueIntegration, arg.ID, arg.WorkspaceID)
-	return err
+func (q *Queries) DeleteIssueIntegration(ctx context.Context, arg DeleteIssueIntegrationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteIssueIntegration, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
-const deleteIssueSyncConfig = `-- name: DeleteIssueSyncConfig :exec
+const deleteIssueSyncConfig = `-- name: DeleteIssueSyncConfig :one
 DELETE FROM issue_sync_config
 WHERE id = $1 AND workspace_id = $2
+RETURNING id
 `
 
 type DeleteIssueSyncConfigParams struct {
@@ -152,9 +156,11 @@ type DeleteIssueSyncConfigParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) DeleteIssueSyncConfig(ctx context.Context, arg DeleteIssueSyncConfigParams) error {
-	_, err := q.db.Exec(ctx, deleteIssueSyncConfig, arg.ID, arg.WorkspaceID)
-	return err
+func (q *Queries) DeleteIssueSyncConfig(ctx context.Context, arg DeleteIssueSyncConfigParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteIssueSyncConfig, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getIssueIntegrationByProviderName = `-- name: GetIssueIntegrationByProviderName :one

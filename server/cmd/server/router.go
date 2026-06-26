@@ -31,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/issuebridge"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -435,6 +436,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	var issueBridgeBox issuebridge.SecretBox
+	if issueBridgeKey, err := secretbox.LoadKey("MULTICA_ISSUE_BRIDGE_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(issueBridgeKey)
+		if err != nil {
+			slog.Error("issue bridge: secretbox.New failed; token operations disabled", "error", err)
+		} else {
+			issueBridgeBox = box
+			slog.Info("issue bridge token storage enabled")
+		}
+	} else {
+		slog.Info("issue bridge token storage disabled (MULTICA_ISSUE_BRIDGE_SECRET_KEY not set)")
+	}
+	h.IssueBridgeService = issuebridge.NewService(queries, issueBridgeBox)
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -781,6 +796,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
+
+			r.Get("/api/issue-integrations", h.ListIssueIntegrations)
+			r.Get("/api/issue-sync-configs", h.ListIssueSyncConfigs)
+
+			r.Group(func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+
+				r.Post("/api/issue-integrations/gitlab", h.CreateGitLabIssueIntegration)
+				r.Put("/api/issue-integrations/{id}", h.UpdateIssueIntegration)
+				r.Delete("/api/issue-integrations/{id}", h.DeleteIssueIntegration)
+				r.Post("/api/issue-integrations/{id}/test", h.TestIssueIntegration)
+				r.Post("/api/issue-sync-configs", h.CreateIssueSyncConfig)
+				r.Put("/api/issue-sync-configs/{id}", h.UpdateIssueSyncConfig)
+				r.Delete("/api/issue-sync-configs/{id}", h.DeleteIssueSyncConfig)
+			})
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {

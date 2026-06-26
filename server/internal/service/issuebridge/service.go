@@ -27,7 +27,7 @@ type Queries interface {
 	GetIssueIntegrationByProviderName(context.Context, db.GetIssueIntegrationByProviderNameParams) (db.IssueIntegration, error)
 	CreateIssueIntegration(context.Context, db.CreateIssueIntegrationParams) (db.IssueIntegration, error)
 	UpdateIssueIntegration(context.Context, db.UpdateIssueIntegrationParams) (db.IssueIntegration, error)
-	DeleteIssueIntegration(context.Context, db.DeleteIssueIntegrationParams) error
+	DeleteIssueIntegration(context.Context, db.DeleteIssueIntegrationParams) (pgtype.UUID, error)
 }
 
 type SecretBox interface {
@@ -188,10 +188,11 @@ func (s *Service) DeleteIntegration(ctx context.Context, workspaceID, id pgtype.
 	if s == nil || s.Queries == nil {
 		return fmt.Errorf("issue bridge service requires queries")
 	}
-	return s.Queries.DeleteIssueIntegration(ctx, db.DeleteIssueIntegrationParams{
+	_, err := s.Queries.DeleteIssueIntegration(ctx, db.DeleteIssueIntegrationParams{
 		ID:          id,
 		WorkspaceID: workspaceID,
 	})
+	return err
 }
 
 func (s *Service) TestGitLabConnection(ctx context.Context, baseURL, token string) (GitLabUser, error) {

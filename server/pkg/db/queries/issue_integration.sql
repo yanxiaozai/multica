@@ -33,9 +33,10 @@ SET name = $3,
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
--- name: DeleteIssueIntegration :exec
+-- name: DeleteIssueIntegration :one
 DELETE FROM issue_integration
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = $1 AND workspace_id = $2
+RETURNING id;
 
 -- name: ListIssueSyncConfigsByWorkspace :many
 SELECT * FROM issue_sync_config
@@ -76,6 +77,7 @@ SET remote_project_ref = $3,
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
--- name: DeleteIssueSyncConfig :exec
+-- name: DeleteIssueSyncConfig :one
 DELETE FROM issue_sync_config
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = $1 AND workspace_id = $2
+RETURNING id;
