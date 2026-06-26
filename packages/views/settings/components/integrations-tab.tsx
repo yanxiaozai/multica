@@ -1,5 +1,6 @@
 "use client";
 
+import { GitLabIssuesTab } from "./gitlab-issues-tab";
 import { LarkTab } from "./lark-tab";
 import { useT } from "../../i18n";
 
@@ -13,6 +14,13 @@ export function IntegrationsTab() {
   const { t } = useT("settings");
   return (
     <div className="space-y-10">
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.issue_bridge.section_title)}
+        </h2>
+        <GitLabIssuesTab />
+      </section>
+
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">{t(($) => $.lark.section_title)}</h2>
         <LarkTab />
