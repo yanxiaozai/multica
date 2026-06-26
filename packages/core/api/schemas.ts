@@ -15,10 +15,15 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  IssueIntegration,
+  IssueSyncConfig,
   ListIssuesResponse,
+  ListIssueIntegrationsResponse,
+  ListIssueSyncConfigsResponse,
   ListWebhookDeliveriesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  TestIssueIntegrationResponse,
   Squad,
   TimelineEntry,
   User,
@@ -323,6 +328,116 @@ export const SearchProjectsResponseSchema = z.object({
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
+  total: 0,
+};
+
+const JsonObjectSchema = z.record(z.string(), z.unknown()).default({});
+const DefaultIssueStateMapping = { opened: "backlog", closed: "done" };
+const IssueStateMappingSchema = z.record(z.string(), z.unknown()).default(DefaultIssueStateMapping);
+
+const IssueIntegrationSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  provider: z.string().default("gitlab"),
+  name: z.string().default(""),
+  base_url: z.string().default(""),
+  default_issue_skill_id: z.string().nullable().default(null),
+  polling_enabled: z.boolean().default(false),
+  default_poll_interval_seconds: z.number().default(300),
+  config: JsonObjectSchema,
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueIntegrationResponseSchema = IssueIntegrationSchema;
+
+export const EMPTY_ISSUE_INTEGRATION: IssueIntegration = {
+  id: "",
+  workspace_id: "",
+  provider: "gitlab",
+  name: "",
+  base_url: "",
+  default_issue_skill_id: null,
+  polling_enabled: false,
+  default_poll_interval_seconds: 300,
+  config: {},
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListIssueIntegrationsResponseSchema = z.object({
+  integrations: z.array(IssueIntegrationSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE: ListIssueIntegrationsResponse = {
+  integrations: [],
+  total: 0,
+};
+
+export const TestIssueIntegrationResponseSchema = z.object({
+  ok: z.boolean().default(false),
+  provider: z.string().default("gitlab"),
+  username: z.string().default(""),
+  name: z.string().default(""),
+}).loose();
+
+export const EMPTY_TEST_ISSUE_INTEGRATION_RESPONSE: TestIssueIntegrationResponse = {
+  ok: false,
+  provider: "gitlab",
+  username: "",
+  name: "",
+};
+
+const IssueSyncConfigSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  integration_id: z.string().default(""),
+  scope_type: z.string().default("project"),
+  scope_id: z.string().default(""),
+  remote_project_ref: z.string().default(""),
+  sync_enabled: z.boolean().default(false),
+  poll_interval_seconds: z.number().nullable().default(null),
+  state_mapping: IssueStateMappingSchema,
+  auto_assign_enabled: z.boolean().default(false),
+  default_assignee_type: z.string().nullable().default(null),
+  default_assignee_id: z.string().nullable().default(null),
+  last_poll_at: z.string().nullable().default(null),
+  last_successful_poll_at: z.string().nullable().default(null),
+  last_error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueSyncConfigResponseSchema = IssueSyncConfigSchema;
+
+export const EMPTY_ISSUE_SYNC_CONFIG: IssueSyncConfig = {
+  id: "",
+  workspace_id: "",
+  integration_id: "",
+  scope_type: "project",
+  scope_id: "",
+  remote_project_ref: "",
+  sync_enabled: false,
+  poll_interval_seconds: null,
+  state_mapping: DefaultIssueStateMapping,
+  auto_assign_enabled: false,
+  default_assignee_type: null,
+  default_assignee_id: null,
+  last_poll_at: null,
+  last_successful_poll_at: null,
+  last_error: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListIssueSyncConfigsResponseSchema = z.object({
+  sync_configs: z.array(IssueSyncConfigSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE: ListIssueSyncConfigsResponse = {
+  sync_configs: [],
   total: 0,
 };
 

@@ -33,6 +33,14 @@ import type {
   CommentTriggerPreview,
   IssueTriggerPreview,
   IssueTriggerPreviewParams,
+  IssueIntegration,
+  IssueSyncConfig,
+  ListIssueIntegrationsResponse,
+  ListIssueSyncConfigsResponse,
+  CreateGitLabIssueIntegrationRequest,
+  UpdateIssueIntegrationRequest,
+  TestIssueIntegrationResponse,
+  UpsertIssueSyncConfigRequest,
   Reaction,
   IssueReaction,
   Workspace,
@@ -158,9 +166,14 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_INTEGRATION,
+  EMPTY_ISSUE_SYNC_CONFIG,
+  EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE,
+  EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
+  EMPTY_TEST_ISSUE_INTEGRATION_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
@@ -171,9 +184,13 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  IssueIntegrationResponseSchema,
+  IssueSyncConfigResponseSchema,
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
+  ListIssueIntegrationsResponseSchema,
   ListIssuesResponseSchema,
+  ListIssueSyncConfigsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -186,6 +203,7 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  TestIssueIntegrationResponseSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
   BillingBalanceSchema,
@@ -736,6 +754,121 @@ export class ApiClient {
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
     return this.fetch("/api/assignee-frequency");
+  }
+
+  async listIssueIntegrations(): Promise<ListIssueIntegrationsResponse> {
+    const raw = await this.fetch<unknown>("/api/issue-integrations");
+    return parseWithFallback(
+      raw,
+      ListIssueIntegrationsResponseSchema,
+      EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE,
+      { endpoint: "GET /api/issue-integrations" },
+    );
+  }
+
+  async createGitLabIssueIntegration(
+    data: CreateGitLabIssueIntegrationRequest,
+  ): Promise<IssueIntegration> {
+    const raw = await this.fetch<unknown>("/api/issue-integrations/gitlab", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      IssueIntegrationResponseSchema,
+      EMPTY_ISSUE_INTEGRATION,
+      { endpoint: "POST /api/issue-integrations/gitlab" },
+    );
+  }
+
+  async updateIssueIntegration(
+    id: string,
+    data: UpdateIssueIntegrationRequest,
+  ): Promise<IssueIntegration> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-integrations/${encodeURIComponent(id)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(data),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      IssueIntegrationResponseSchema,
+      EMPTY_ISSUE_INTEGRATION,
+      { endpoint: "PUT /api/issue-integrations/:id" },
+    );
+  }
+
+  async deleteIssueIntegration(id: string): Promise<void> {
+    await this.fetch(
+      `/api/issue-integrations/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async testIssueIntegration(id: string): Promise<TestIssueIntegrationResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-integrations/${encodeURIComponent(id)}/test`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      TestIssueIntegrationResponseSchema,
+      EMPTY_TEST_ISSUE_INTEGRATION_RESPONSE,
+      { endpoint: "POST /api/issue-integrations/:id/test" },
+    );
+  }
+
+  async listIssueSyncConfigs(): Promise<ListIssueSyncConfigsResponse> {
+    const raw = await this.fetch<unknown>("/api/issue-sync-configs");
+    return parseWithFallback(
+      raw,
+      ListIssueSyncConfigsResponseSchema,
+      EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE,
+      { endpoint: "GET /api/issue-sync-configs" },
+    );
+  }
+
+  async createIssueSyncConfig(
+    data: UpsertIssueSyncConfigRequest,
+  ): Promise<IssueSyncConfig> {
+    const raw = await this.fetch<unknown>("/api/issue-sync-configs", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      IssueSyncConfigResponseSchema,
+      EMPTY_ISSUE_SYNC_CONFIG,
+      { endpoint: "POST /api/issue-sync-configs" },
+    );
+  }
+
+  async updateIssueSyncConfig(
+    id: string,
+    data: UpsertIssueSyncConfigRequest,
+  ): Promise<IssueSyncConfig> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-sync-configs/${encodeURIComponent(id)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(data),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      IssueSyncConfigResponseSchema,
+      EMPTY_ISSUE_SYNC_CONFIG,
+      { endpoint: "PUT /api/issue-sync-configs/:id" },
+    );
+  }
+
+  async deleteIssueSyncConfig(id: string): Promise<void> {
+    await this.fetch(
+      `/api/issue-sync-configs/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {

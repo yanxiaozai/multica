@@ -201,6 +201,94 @@ export interface SearchProjectsResponse {
   total: number;
 }
 
+export type IssueIntegrationProvider = "gitlab";
+export type IssueSyncScopeType = "project" | "repo_resource";
+export type IssueSyncAssigneeType = "agent" | "squad";
+
+export interface IssueIntegration {
+  id: string;
+  workspace_id: string;
+  provider: string;
+  name: string;
+  base_url: string;
+  default_issue_skill_id: string | null;
+  polling_enabled: boolean;
+  default_poll_interval_seconds: number;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListIssueIntegrationsResponse {
+  integrations: IssueIntegration[];
+  total: number;
+}
+
+export interface CreateGitLabIssueIntegrationRequest {
+  name?: string;
+  base_url: string;
+  token: string;
+  default_issue_skill_id?: string | null;
+  polling_enabled?: boolean;
+  default_poll_interval_seconds?: number;
+  config?: Record<string, unknown>;
+}
+
+export interface UpdateIssueIntegrationRequest {
+  name: string;
+  base_url: string;
+  token?: string;
+  default_issue_skill_id?: string | null;
+  polling_enabled?: boolean;
+  default_poll_interval_seconds?: number;
+  config?: Record<string, unknown>;
+}
+
+export interface TestIssueIntegrationResponse {
+  ok: boolean;
+  provider: string;
+  username: string;
+  name: string;
+}
+
+export interface IssueSyncConfig {
+  id: string;
+  workspace_id: string;
+  integration_id: string;
+  scope_type: string;
+  scope_id: string;
+  remote_project_ref: string;
+  sync_enabled: boolean;
+  poll_interval_seconds: number | null;
+  state_mapping: Record<string, unknown>;
+  auto_assign_enabled: boolean;
+  default_assignee_type: string | null;
+  default_assignee_id: string | null;
+  last_poll_at: string | null;
+  last_successful_poll_at: string | null;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListIssueSyncConfigsResponse {
+  sync_configs: IssueSyncConfig[];
+  total: number;
+}
+
+export interface UpsertIssueSyncConfigRequest {
+  integration_id?: string;
+  scope_type?: IssueSyncScopeType;
+  scope_id?: string;
+  remote_project_ref: string;
+  sync_enabled?: boolean;
+  poll_interval_seconds?: number | null;
+  state_mapping?: Record<string, unknown>;
+  auto_assign_enabled?: boolean;
+  default_assignee_type?: IssueSyncAssigneeType | null;
+  default_assignee_id?: string | null;
+}
+
 export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
