@@ -49,7 +49,14 @@ This plan does not implement:
 **Files:**
 - Create: `packages/core/issue-bridge/queries.ts`
 - Create: `packages/core/issue-bridge/index.ts`
+- Modify: `packages/core/api/client.ts`
 - Modify: `packages/core/package.json`
+
+Issue bridge API client methods must accept an optional `{ workspace_id }`
+parameter, append it to the request URL, and omit the default
+`X-Workspace-Slug` header when that explicit `workspace_id` is present. The
+backend resolves slug before query params, so sending both can target the wrong
+workspace during active-workspace switches.
 
 - [ ] **Step 1: Add query keys and options**
 
@@ -75,7 +82,7 @@ export const issueBridgeKeys = {
 export function issueIntegrationsOptions(wsId: string) {
   return queryOptions({
     queryKey: issueBridgeKeys.integrations(wsId),
-    queryFn: () => api.listIssueIntegrations(),
+    queryFn: () => api.listIssueIntegrations({ workspace_id: wsId }),
     enabled: !!wsId,
   });
 }
@@ -83,7 +90,7 @@ export function issueIntegrationsOptions(wsId: string) {
 export function issueSyncConfigsOptions(wsId: string) {
   return queryOptions({
     queryKey: issueBridgeKeys.syncConfigs(wsId),
-    queryFn: () => api.listIssueSyncConfigs(),
+    queryFn: () => api.listIssueSyncConfigs({ workspace_id: wsId }),
     enabled: !!wsId,
   });
 }
@@ -98,7 +105,7 @@ export function useCreateGitLabIssueIntegration(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateGitLabIssueIntegrationRequest) =>
-      api.createGitLabIssueIntegration(data),
+      api.createGitLabIssueIntegration(data, { workspace_id: wsId }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueBridgeKeys.integrations(wsId) });
     },
@@ -114,7 +121,7 @@ export function useUpdateIssueIntegration(wsId: string) {
     }: {
       id: string;
       data: UpdateIssueIntegrationRequest;
-    }) => api.updateIssueIntegration(id, data),
+    }) => api.updateIssueIntegration(id, data, { workspace_id: wsId }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueBridgeKeys.integrations(wsId) });
       qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
@@ -125,7 +132,7 @@ export function useUpdateIssueIntegration(wsId: string) {
 export function useDeleteIssueIntegration(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.deleteIssueIntegration(id),
+    mutationFn: (id: string) => api.deleteIssueIntegration(id, { workspace_id: wsId }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueBridgeKeys.integrations(wsId) });
       qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
@@ -133,9 +140,9 @@ export function useDeleteIssueIntegration(wsId: string) {
   });
 }
 
-export function useTestIssueIntegration() {
+export function useTestIssueIntegration(wsId: string) {
   return useMutation({
-    mutationFn: (id: string) => api.testIssueIntegration(id),
+    mutationFn: (id: string) => api.testIssueIntegration(id, { workspace_id: wsId }),
   });
 }
 ```
@@ -149,7 +156,7 @@ export function useCreateIssueSyncConfig(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: UpsertIssueSyncConfigRequest) =>
-      api.createIssueSyncConfig(data),
+      api.createIssueSyncConfig(data, { workspace_id: wsId }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
     },
@@ -165,7 +172,7 @@ export function useUpdateIssueSyncConfig(wsId: string) {
     }: {
       id: string;
       data: UpsertIssueSyncConfigRequest;
-    }) => api.updateIssueSyncConfig(id, data),
+    }) => api.updateIssueSyncConfig(id, data, { workspace_id: wsId }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
     },
@@ -175,7 +182,7 @@ export function useUpdateIssueSyncConfig(wsId: string) {
 export function useDeleteIssueSyncConfig(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.deleteIssueSyncConfig(id),
+    mutationFn: (id: string) => api.deleteIssueSyncConfig(id, { workspace_id: wsId }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
     },
@@ -574,7 +581,7 @@ Use hooks from `@multica/core/issue-bridge`:
 const createIntegration = useCreateGitLabIssueIntegration(wsId);
 const updateIntegration = useUpdateIssueIntegration(wsId);
 const deleteIntegration = useDeleteIssueIntegration(wsId);
-const testIntegration = useTestIssueIntegration();
+const testIntegration = useTestIssueIntegration(wsId);
 ```
 
 Save payload:

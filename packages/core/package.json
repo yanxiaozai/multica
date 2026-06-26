@@ -81,6 +81,8 @@
     "./billing": "./billing/index.ts",
     "./billing/queries": "./billing/queries.ts",
     "./billing/mutations": "./billing/mutations.ts",
+    "./issue-bridge": "./issue-bridge/index.ts",
+    "./issue-bridge/queries": "./issue-bridge/queries.ts",
     "./github": "./github/index.ts",
     "./github/queries": "./github/queries.ts",
     "./lark": "./lark/index.ts",

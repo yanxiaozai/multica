@@ -250,6 +250,27 @@ export interface LoginResponse {
   user: User;
 }
 
+type ApiFetchInit = RequestInit & {
+  extraHeaders?: Record<string, string>;
+  omitWorkspaceSlug?: boolean;
+};
+
+type IssueBridgeWorkspaceParams = {
+  workspace_id?: string;
+};
+
+function issueBridgePath(path: string, params?: IssueBridgeWorkspaceParams): string {
+  const search = new URLSearchParams();
+  if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function issueBridgeInit(params?: IssueBridgeWorkspaceParams, init?: ApiFetchInit): ApiFetchInit | undefined {
+  if (!params?.workspace_id) return init;
+  return { ...init, omitWorkspaceSlug: true };
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -316,11 +337,11 @@ export class ApiClient {
     return match ? match.split("=")[1] ?? null : null;
   }
 
-  private authHeaders(): Record<string, string> {
+  private authHeaders(options?: { omitWorkspaceSlug?: boolean }): Record<string, string> {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     const slug = getCurrentSlug();
-    if (slug) headers["X-Workspace-Slug"] = slug;
+    if (slug && !options?.omitWorkspaceSlug) headers["X-Workspace-Slug"] = slug;
     const csrf = this.readCsrfToken();
     if (csrf) headers["X-CSRF-Token"] = csrf;
     const id = this.options.identity;
@@ -369,23 +390,24 @@ export class ApiClient {
   // path, plain text for the attachment-preview proxy, etc.
   private async fetchRaw(
     path: string,
-    init?: RequestInit & { extraHeaders?: Record<string, string> },
+    init?: ApiFetchInit,
   ): Promise<Response> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
+    const { extraHeaders, omitWorkspaceSlug, ...requestInit } = init ?? {};
 
     const headers: Record<string, string> = {
       "X-Request-ID": rid,
-      ...this.authHeaders(),
-      ...(init?.extraHeaders ?? {}),
-      ...((init?.headers as Record<string, string>) ?? {}),
+      ...this.authHeaders({ omitWorkspaceSlug }),
+      ...(extraHeaders ?? {}),
+      ...((requestInit.headers as Record<string, string>) ?? {}),
     };
 
     this.logger.info(`→ ${method} ${path}`, { rid });
 
     const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
+      ...requestInit,
       headers,
       credentials: "include",
     });
@@ -402,7 +424,7 @@ export class ApiClient {
     return res;
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  private async fetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
     const res = await this.fetchRaw(path, {
       ...init,
       extraHeaders: { "Content-Type": "application/json" },
@@ -756,8 +778,13 @@ export class ApiClient {
     return this.fetch("/api/assignee-frequency");
   }
 
-  async listIssueIntegrations(): Promise<ListIssueIntegrationsResponse> {
-    const raw = await this.fetch<unknown>("/api/issue-integrations");
+  async listIssueIntegrations(
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<ListIssueIntegrationsResponse> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-integrations", params),
+      issueBridgeInit(params),
+    );
     return parseWithFallback(
       raw,
       ListIssueIntegrationsResponseSchema,
@@ -768,11 +795,15 @@ export class ApiClient {
 
   async createGitLabIssueIntegration(
     data: CreateGitLabIssueIntegrationRequest,
+    params?: IssueBridgeWorkspaceParams,
   ): Promise<IssueIntegration> {
-    const raw = await this.fetch<unknown>("/api/issue-integrations/gitlab", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-integrations/gitlab", params),
+      issueBridgeInit(params, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    );
     return parseWithFallback(
       raw,
       IssueIntegrationResponseSchema,
@@ -784,13 +815,14 @@ export class ApiClient {
   async updateIssueIntegration(
     id: string,
     data: UpdateIssueIntegrationRequest,
+    params?: IssueBridgeWorkspaceParams,
   ): Promise<IssueIntegration> {
     const raw = await this.fetch<unknown>(
-      `/api/issue-integrations/${encodeURIComponent(id)}`,
-      {
+      issueBridgePath(`/api/issue-integrations/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, {
         method: "PUT",
         body: JSON.stringify(data),
-      },
+      }),
     );
     return parseWithFallback(
       raw,
@@ -800,17 +832,26 @@ export class ApiClient {
     );
   }
 
-  async deleteIssueIntegration(id: string): Promise<void> {
+  async deleteIssueIntegration(
+    id: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<void> {
     await this.fetch(
-      `/api/issue-integrations/${encodeURIComponent(id)}`,
-      { method: "DELETE" },
+      issueBridgePath(`/api/issue-integrations/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, { method: "DELETE" }),
     );
   }
 
-  async testIssueIntegration(id: string): Promise<TestIssueIntegrationResponse> {
+  async testIssueIntegration(
+    id: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<TestIssueIntegrationResponse> {
     const raw = await this.fetch<unknown>(
-      `/api/issue-integrations/${encodeURIComponent(id)}/test`,
-      { method: "POST" },
+      issueBridgePath(
+        `/api/issue-integrations/${encodeURIComponent(id)}/test`,
+        params,
+      ),
+      issueBridgeInit(params, { method: "POST" }),
     );
     return parseWithFallback(
       raw,
@@ -820,8 +861,13 @@ export class ApiClient {
     );
   }
 
-  async listIssueSyncConfigs(): Promise<ListIssueSyncConfigsResponse> {
-    const raw = await this.fetch<unknown>("/api/issue-sync-configs");
+  async listIssueSyncConfigs(
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<ListIssueSyncConfigsResponse> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-sync-configs", params),
+      issueBridgeInit(params),
+    );
     return parseWithFallback(
       raw,
       ListIssueSyncConfigsResponseSchema,
@@ -832,11 +878,15 @@ export class ApiClient {
 
   async createIssueSyncConfig(
     data: UpsertIssueSyncConfigRequest,
+    params?: IssueBridgeWorkspaceParams,
   ): Promise<IssueSyncConfig> {
-    const raw = await this.fetch<unknown>("/api/issue-sync-configs", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-sync-configs", params),
+      issueBridgeInit(params, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    );
     return parseWithFallback(
       raw,
       IssueSyncConfigResponseSchema,
@@ -848,13 +898,14 @@ export class ApiClient {
   async updateIssueSyncConfig(
     id: string,
     data: UpsertIssueSyncConfigRequest,
+    params?: IssueBridgeWorkspaceParams,
   ): Promise<IssueSyncConfig> {
     const raw = await this.fetch<unknown>(
-      `/api/issue-sync-configs/${encodeURIComponent(id)}`,
-      {
+      issueBridgePath(`/api/issue-sync-configs/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, {
         method: "PUT",
         body: JSON.stringify(data),
-      },
+      }),
     );
     return parseWithFallback(
       raw,
@@ -864,10 +915,13 @@ export class ApiClient {
     );
   }
 
-  async deleteIssueSyncConfig(id: string): Promise<void> {
+  async deleteIssueSyncConfig(
+    id: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<void> {
     await this.fetch(
-      `/api/issue-sync-configs/${encodeURIComponent(id)}`,
-      { method: "DELETE" },
+      issueBridgePath(`/api/issue-sync-configs/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, { method: "DELETE" }),
     );
   }
 
