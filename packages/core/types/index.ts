@@ -168,6 +168,26 @@ export type {
   SquadMemberStatusListResponse,
 } from "./squad";
 export type {
+  SpecDecision,
+  SpecDocument,
+  SpecEpic,
+  SpecIssueContext,
+  SpecIssueMapping,
+  SpecIssueState,
+  SpecModule,
+  ListSpecDocumentsResponse,
+  ListSpecEpicsResponse,
+  ListSpecModulesResponse,
+  UpdateIssueSpecMappingRequest,
+  UpdateIssueSpecMappingResponse,
+  UpdateIssueSpecStateRequest,
+  UpdateIssueSpecStateResponse,
+  UpdateSpecDocumentRequest,
+  UpdateSpecDocumentResponse,
+  CreateSpecDecisionRequest,
+  CreateSpecDecisionResponse,
+} from "./spec-memory";
+export type {
   BillingBalance,
   BillingTransaction,
   BillingTransactionsPage,

@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  LibraryBig,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -54,6 +55,7 @@ import { maxSiblingStage } from "./pickers/stage-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
+import { IssueSpecPanel } from "../../spec-memory";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -744,6 +746,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [specMemoryOpen, setSpecMemoryOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const githubSettings = useGitHubSettings();
@@ -1601,6 +1604,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
       )}
+
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${specMemoryOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setSpecMemoryOpen(!specMemoryOpen)}
+        >
+          <LibraryBig className="!size-3 shrink-0" />
+          Spec memory
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${specMemoryOpen ? "rotate-90" : ""}`} />
+        </button>
+        {specMemoryOpen && <div className="pl-2"><IssueSpecPanel issueId={id} /></div>}
+      </div>
 
       {/* Details */}
       <div>

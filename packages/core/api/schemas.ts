@@ -25,6 +25,20 @@ import type {
   ListWebhookDeliveriesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  SpecDecision,
+  SpecDocument,
+  SpecEpic,
+  SpecIssueContext,
+  SpecIssueMapping,
+  SpecIssueState,
+  SpecModule,
+  ListSpecDocumentsResponse,
+  ListSpecEpicsResponse,
+  ListSpecModulesResponse,
+  UpdateIssueSpecMappingResponse,
+  UpdateIssueSpecStateResponse,
+  UpdateSpecDocumentResponse,
+  CreateSpecDecisionResponse,
   TestIssueIntegrationResponse,
   Squad,
   TimelineEntry,
@@ -282,6 +296,242 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+export const SpecEpicSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  description: z.string().default(""),
+  stability: z.string().default("draft"),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_EPIC: SpecEpic = {
+  id: "",
+  workspace_id: "",
+  key: "",
+  title: "",
+  description: "",
+  stability: "draft",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecModuleSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  epic_id: z.string(),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  description: z.string().default(""),
+  stability: z.string().default("draft"),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_MODULE: SpecModule = {
+  id: "",
+  workspace_id: "",
+  epic_id: "",
+  key: "",
+  title: "",
+  description: "",
+  stability: "draft",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecDocumentSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  epic_id: z.string().nullable().optional().default(null),
+  module_id: z.string().nullable().optional().default(null),
+  doc_kind: z.string().default(""),
+  title: z.string().default(""),
+  body: z.string().default(""),
+  source_path: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_DOCUMENT: SpecDocument = {
+  id: "",
+  workspace_id: "",
+  epic_id: null,
+  module_id: null,
+  doc_kind: "",
+  title: "",
+  body: "",
+  source_path: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecIssueMappingSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  issue_id: z.string(),
+  epic_id: z.string().nullable().optional().default(null),
+  module_id: z.string().nullable().optional().default(null),
+  mapping_kind: z.string().default("related"),
+  reason: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_ISSUE_MAPPING: SpecIssueMapping = {
+  id: "",
+  workspace_id: "",
+  issue_id: "",
+  epic_id: null,
+  module_id: null,
+  mapping_kind: "related",
+  reason: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecIssueStateSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  issue_id: z.string(),
+  status: z.string().default("todo"),
+  owner: z.string().default(""),
+  current_stage: z.string().default("requirements"),
+  current_loop: z.string().default("requirements"),
+  last_result: z.string().default("pending"),
+  open_questions: z.array(z.string()).default([]),
+  blockers: z.array(z.string()).default([]),
+  next_handoff: z.string().default(""),
+  audit_mode: z.string().default("required"),
+  audit_skipped: z.boolean().default(false),
+  audit_skip_reason: z.string().default(""),
+  audit_skipped_by: z.string().default(""),
+  audit_skipped_at: z.string().nullable().optional().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_ISSUE_STATE: SpecIssueState = {
+  id: "",
+  workspace_id: "",
+  issue_id: "",
+  status: "todo",
+  owner: "",
+  current_stage: "requirements",
+  current_loop: "requirements",
+  last_result: "pending",
+  open_questions: [],
+  blockers: [],
+  next_handoff: "",
+  audit_mode: "required",
+  audit_skipped: false,
+  audit_skip_reason: "",
+  audit_skipped_by: "",
+  audit_skipped_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecDecisionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  epic_id: z.string().nullable().optional().default(null),
+  module_id: z.string().nullable().optional().default(null),
+  title: z.string().default(""),
+  body: z.string().default(""),
+  actor: z.string().default(""),
+  source_path: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_DECISION: SpecDecision = {
+  id: "",
+  workspace_id: "",
+  epic_id: null,
+  module_id: null,
+  title: "",
+  body: "",
+  actor: "",
+  source_path: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListSpecEpicsResponseSchema = z.object({
+  epics: z.array(SpecEpicSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SPEC_EPICS_RESPONSE: ListSpecEpicsResponse = {
+  epics: [],
+};
+
+export const ListSpecModulesResponseSchema = z.object({
+  modules: z.array(SpecModuleSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SPEC_MODULES_RESPONSE: ListSpecModulesResponse = {
+  modules: [],
+};
+
+export const ListSpecDocumentsResponseSchema = z.object({
+  documents: z.array(SpecDocumentSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE: ListSpecDocumentsResponse = {
+  documents: [],
+};
+
+export const SpecIssueContextSchema = z.object({
+  issue_id: z.string().default(""),
+  state: SpecIssueStateSchema.nullable().optional().default(null),
+  mappings: z.array(SpecIssueMappingSchema).default([]),
+  documents: z.array(SpecDocumentSchema).default([]),
+  metadata: IssueMetadataSchema,
+}).loose();
+
+export const EMPTY_SPEC_ISSUE_CONTEXT: SpecIssueContext = {
+  issue_id: "",
+  state: null,
+  mappings: [],
+  documents: [],
+  metadata: {},
+};
+
+export const UpdateIssueSpecMappingResponseSchema = z.object({
+  primary: SpecIssueMappingSchema,
+}).loose();
+
+export const EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE: UpdateIssueSpecMappingResponse = {
+  primary: EMPTY_SPEC_ISSUE_MAPPING,
+};
+
+export const UpdateIssueSpecStateResponseSchema = z.object({
+  state: SpecIssueStateSchema,
+}).loose();
+
+export const EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE: UpdateIssueSpecStateResponse = {
+  state: EMPTY_SPEC_ISSUE_STATE,
+};
+
+export const UpdateSpecDocumentResponseSchema = z.object({
+  document: SpecDocumentSchema,
+}).loose();
+
+export const EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE: UpdateSpecDocumentResponse = {
+  document: EMPTY_SPEC_DOCUMENT,
+};
+
+export const CreateSpecDecisionResponseSchema = z.object({
+  decision: SpecDecisionSchema,
+}).loose();
+
+export const EMPTY_CREATE_SPEC_DECISION_RESPONSE: CreateSpecDecisionResponse = {
+  decision: EMPTY_SPEC_DECISION,
 };
 
 const SearchIssueResultSchema = IssueSchema.extend({

@@ -742,6 +742,88 @@ type SkillFile struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SpecDecision struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EpicID      pgtype.UUID        `json:"epic_id"`
+	ModuleID    pgtype.UUID        `json:"module_id"`
+	Title       string             `json:"title"`
+	Body        string             `json:"body"`
+	Actor       string             `json:"actor"`
+	SourcePath  string             `json:"source_path"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SpecDocument struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EpicID      pgtype.UUID        `json:"epic_id"`
+	ModuleID    pgtype.UUID        `json:"module_id"`
+	DocKind     string             `json:"doc_kind"`
+	Title       string             `json:"title"`
+	Body        string             `json:"body"`
+	SourcePath  string             `json:"source_path"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SpecEpic struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	Stability   string             `json:"stability"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SpecIssueMapping struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	EpicID      pgtype.UUID        `json:"epic_id"`
+	ModuleID    pgtype.UUID        `json:"module_id"`
+	MappingKind string             `json:"mapping_kind"`
+	Reason      string             `json:"reason"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SpecIssueState struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	Status          string             `json:"status"`
+	Owner           string             `json:"owner"`
+	CurrentStage    string             `json:"current_stage"`
+	CurrentLoop     string             `json:"current_loop"`
+	LastResult      string             `json:"last_result"`
+	OpenQuestions   []byte             `json:"open_questions"`
+	Blockers        []byte             `json:"blockers"`
+	NextHandoff     string             `json:"next_handoff"`
+	AuditMode       string             `json:"audit_mode"`
+	AuditSkipped    bool               `json:"audit_skipped"`
+	AuditSkipReason string             `json:"audit_skip_reason"`
+	AuditSkippedBy  string             `json:"audit_skipped_by"`
+	AuditSkippedAt  pgtype.Timestamptz `json:"audit_skipped_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SpecModule struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EpicID      pgtype.UUID        `json:"epic_id"`
+	Key         string             `json:"key"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	Stability   string             `json:"stability"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Squad struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`

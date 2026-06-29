@@ -12,6 +12,7 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SpecIssueContextSchema,
   SquadListSchema,
   SquadInstructionsGenerationJobSchema,
   SquadSchema,
@@ -89,6 +90,34 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const payload = { issues: [issueWithoutStage], total: 1 };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.stage).toBeNull();
+  });
+});
+
+describe("SpecIssueContextSchema", () => {
+  it("defaults optional issue spec collections", () => {
+    const parsed = SpecIssueContextSchema.parse({
+      issue_id: "11111111-1111-1111-1111-111111111111",
+      metadata: { spec_primary: "module-id" },
+    });
+    expect(parsed.state).toBeNull();
+    expect(parsed.mappings).toEqual([]);
+    expect(parsed.documents).toEqual([]);
+    expect(parsed.metadata).toEqual({ spec_primary: "module-id" });
+  });
+
+  it("defaults issue state arrays", () => {
+    const parsed = SpecIssueContextSchema.parse({
+      issue_id: "11111111-1111-1111-1111-111111111111",
+      state: {
+        id: "state-1",
+        workspace_id: "ws-1",
+        issue_id: "11111111-1111-1111-1111-111111111111",
+      },
+      metadata: {},
+    });
+    expect(parsed.state?.open_questions).toEqual([]);
+    expect(parsed.state?.blockers).toEqual([]);
+    expect(parsed.state?.audit_mode).toBe("required");
   });
 });
 

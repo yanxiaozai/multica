@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, LibraryBig, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -464,6 +464,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
+  const [specMemoryOpen, setSpecMemoryOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
 
   // Sidebar panel
@@ -776,6 +777,35 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />
+
+      {/* Spec Memory */}
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${specMemoryOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setSpecMemoryOpen(!specMemoryOpen)}
+        >
+          {t(($) => $.detail.section_spec_memory)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${specMemoryOpen ? "rotate-90" : ""}`} />
+        </button>
+        {specMemoryOpen && (
+          <div className="pl-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push(wsPaths.projectSpecMemory(projectId))}
+            >
+              <LibraryBig className="size-3.5" />
+              {t(($) => $.detail.open_spec_memory)}
+            </Button>
+            <p className="mt-2 px-2 text-xs text-muted-foreground">
+              {t(($) => $.detail.spec_memory_hint)}
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 

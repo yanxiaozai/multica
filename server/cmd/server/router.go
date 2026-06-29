@@ -885,6 +885,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+
+			// Spec Memory
+			r.Route("/api/spec", func(r chi.Router) {
+				r.Post("/sync/from-files", h.SyncSpecFromFiles)
+				r.Get("/sync/to-files", h.SyncSpecToFiles)
+				r.Get("/epics", h.ListSpecEpics)
+				r.Get("/epics/{epicId}/modules", h.ListSpecModules)
+				r.Get("/modules/{moduleId}/documents", h.ListSpecModuleDocuments)
+				r.Put("/modules/{moduleId}/documents/{docKind}", h.UpdateSpecModuleDocument)
+				r.Post("/decisions", h.CreateSpecDecision)
+			})
+
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)

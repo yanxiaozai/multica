@@ -483,6 +483,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeSpecMemory(&b)
 
 	switch kind {
 	case kindQuickCreate:

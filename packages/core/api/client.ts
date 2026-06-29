@@ -135,6 +135,18 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  CreateSpecDecisionRequest,
+  CreateSpecDecisionResponse,
+  ListSpecDocumentsResponse,
+  ListSpecEpicsResponse,
+  ListSpecModulesResponse,
+  SpecIssueContext,
+  UpdateIssueSpecMappingRequest,
+  UpdateIssueSpecMappingResponse,
+  UpdateIssueSpecStateRequest,
+  UpdateIssueSpecStateResponse,
+  UpdateSpecDocumentRequest,
+  UpdateSpecDocumentResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -231,6 +243,22 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  EMPTY_CREATE_SPEC_DECISION_RESPONSE,
+  EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE,
+  EMPTY_LIST_SPEC_EPICS_RESPONSE,
+  EMPTY_LIST_SPEC_MODULES_RESPONSE,
+  EMPTY_SPEC_ISSUE_CONTEXT,
+  EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE,
+  EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE,
+  EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE,
+  CreateSpecDecisionResponseSchema,
+  ListSpecDocumentsResponseSchema,
+  ListSpecEpicsResponseSchema,
+  ListSpecModulesResponseSchema,
+  SpecIssueContextSchema,
+  UpdateIssueSpecMappingResponseSchema,
+  UpdateIssueSpecStateResponseSchema,
+  UpdateSpecDocumentResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -673,6 +701,74 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/issues/${id}/children`);
     return parseWithFallback(raw, ChildIssuesResponseSchema, { issues: [] }, {
       endpoint: "GET /api/issues/:id/children",
+    });
+  }
+
+  async getIssueSpec(issueId: string): Promise<SpecIssueContext> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/spec`);
+    return parseWithFallback(raw, SpecIssueContextSchema, EMPTY_SPEC_ISSUE_CONTEXT, {
+      endpoint: "GET /api/issues/:id/spec",
+    });
+  }
+
+  async updateIssueSpecMapping(issueId: string, data: UpdateIssueSpecMappingRequest): Promise<UpdateIssueSpecMappingResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/spec/mapping`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UpdateIssueSpecMappingResponseSchema, EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE, {
+      endpoint: "PUT /api/issues/:id/spec/mapping",
+    });
+  }
+
+  async updateIssueSpecState(issueId: string, data: UpdateIssueSpecStateRequest): Promise<UpdateIssueSpecStateResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/spec/state`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UpdateIssueSpecStateResponseSchema, EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE, {
+      endpoint: "PUT /api/issues/:id/spec/state",
+    });
+  }
+
+  async listSpecEpics(): Promise<ListSpecEpicsResponse> {
+    const raw = await this.fetch<unknown>("/api/spec/epics");
+    return parseWithFallback(raw, ListSpecEpicsResponseSchema, EMPTY_LIST_SPEC_EPICS_RESPONSE, {
+      endpoint: "GET /api/spec/epics",
+    });
+  }
+
+  async listSpecModules(epicId: string): Promise<ListSpecModulesResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/epics/${epicId}/modules`);
+    return parseWithFallback(raw, ListSpecModulesResponseSchema, EMPTY_LIST_SPEC_MODULES_RESPONSE, {
+      endpoint: "GET /api/spec/epics/:id/modules",
+    });
+  }
+
+  async listSpecDocuments(moduleId: string): Promise<ListSpecDocumentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/modules/${moduleId}/documents`);
+    return parseWithFallback(raw, ListSpecDocumentsResponseSchema, EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE, {
+      endpoint: "GET /api/spec/modules/:id/documents",
+    });
+  }
+
+  async updateSpecDocument(moduleId: string, docKind: string, data: UpdateSpecDocumentRequest): Promise<UpdateSpecDocumentResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/modules/${moduleId}/documents/${docKind}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UpdateSpecDocumentResponseSchema, EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE, {
+      endpoint: "PUT /api/spec/modules/:id/documents/:docKind",
+    });
+  }
+
+  async createSpecDecision(data: CreateSpecDecisionRequest): Promise<CreateSpecDecisionResponse> {
+    const raw = await this.fetch<unknown>("/api/spec/decisions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CreateSpecDecisionResponseSchema, EMPTY_CREATE_SPEC_DECISION_RESPONSE, {
+      endpoint: "POST /api/spec/decisions",
     });
   }
 
