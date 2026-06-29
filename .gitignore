@@ -41,6 +41,11 @@ server/tmp/
 server/migrate
 server/daemon
 server/multica
+server/.gocache/
+server/.gomodcache/
+
+# package manager caches
+.pnpm-store/
 
 # Test artifacts
 test-results/
