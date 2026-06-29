@@ -39,7 +39,7 @@ var codexBlockedArgs = map[string]blockedArgMode{
 const (
 	codexStderrTailBytes                   = 2048
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
-	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
+	defaultCodexFirstTurnNoProgressTimeout = 2 * time.Minute
 	codexVersionDiagnosticTimeout          = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
@@ -531,6 +531,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if semanticInactivityTimeout == 0 {
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
+	firstTurnNoProgressTimeout := opts.FirstTurnNoProgressTimeout
+	if firstTurnNoProgressTimeout == 0 {
+		firstTurnNoProgressTimeout = codexFirstTurnNoProgressTimeout(semanticInactivityTimeout)
+	}
 	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
@@ -847,7 +851,6 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
 
-		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout)
 		var firstTurnNoProgressTimer *time.Timer
 		var firstTurnNoProgressTimerC <-chan time.Time
 		firstTurnStarted := false

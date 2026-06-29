@@ -1539,6 +1539,20 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCodexFirstTurnNoProgressTimeoutDefaultsAndScaling(t *testing.T) {
+	t.Parallel()
+
+	if got := codexFirstTurnNoProgressTimeout(0); got != defaultCodexFirstTurnNoProgressTimeout {
+		t.Fatalf("expected default timeout for zero semantic timeout, got %s", got)
+	}
+	if got := codexFirstTurnNoProgressTimeout(10 * time.Minute); got != defaultCodexFirstTurnNoProgressTimeout {
+		t.Fatalf("expected default timeout for long semantic timeout, got %s", got)
+	}
+	if got := codexFirstTurnNoProgressTimeout(100 * time.Millisecond); got != 80*time.Millisecond {
+		t.Fatalf("expected short semantic timeout to scale first-turn timeout, got %s", got)
+	}
+}
+
 func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1653,7 +1667,6 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 			elapsed)
 	}
 }
-
 
 func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testing.T) {
 	t.Parallel()

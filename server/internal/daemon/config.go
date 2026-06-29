@@ -26,8 +26,9 @@ const (
 	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
 	// never killed merely for running long (MUL-3064). Operators who want a
 	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
-	DefaultAgentTimeout                   = 0
-	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	DefaultAgentTimeout                    = 0
+	DefaultCodexSemanticInactivityTimeout  = 10 * time.Minute
+	DefaultCodexFirstTurnNoProgressTimeout = 2 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
@@ -72,36 +73,37 @@ var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo"}
 
 // Config holds all daemon configuration.
 type Config struct {
-	ServerBaseURL                  string
-	DaemonID                       string
-	LegacyDaemonIDs                []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
-	DeviceName                     string
-	RuntimeName                    string
-	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
-	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
-	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder
-	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
-	KeepEnvAfterTask               bool                  // preserve env after task for debugging
-	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
-	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
-	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
-	GCInterval                     time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
-	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
-	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
-	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
-	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
-	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
-	PollInterval                   time.Duration
-	HeartbeatInterval              time.Duration
-	AgentTimeout                   time.Duration
-	CodexSemanticInactivityTimeout time.Duration
-	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
-	ClaudeArgs                     []string
-	CodexArgs                      []string
-	CodebuddyArgs                  []string
+	ServerBaseURL                   string
+	DaemonID                        string
+	LegacyDaemonIDs                 []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	DeviceName                      string
+	RuntimeName                     string
+	CLIVersion                      string                // multica CLI version (e.g. "0.1.13")
+	LaunchedBy                      string                // "desktop" when spawned by the Electron app, empty for standalone
+	Profile                         string                // profile name (empty = default)
+	Agents                          map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder
+	WorkspacesRoot                  string                // base path for execution envs (default: ~/multica_workspaces)
+	KeepEnvAfterTask                bool                  // preserve env after task for debugging
+	HealthPort                      int                   // local HTTP port for health checks (default: 19514)
+	MaxConcurrentTasks              int                   // max tasks running in parallel (default: 20)
+	GCEnabled                       bool                  // enable periodic workspace garbage collection (default: true)
+	GCInterval                      time.Duration         // how often the GC loop runs (default: 1h)
+	GCTTL                           time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
+	GCOrphanTTL                     time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
+	GCArtifactTTL                   time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
+	GCArtifactPatterns              []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
+	AutoUpdateEnabled               bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
+	AutoUpdateCheckInterval         time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
+	PollInterval                    time.Duration
+	HeartbeatInterval               time.Duration
+	AgentTimeout                    time.Duration
+	CodexSemanticInactivityTimeout  time.Duration
+	CodexFirstTurnNoProgressTimeout time.Duration
+	AgentIdleWatchdog               time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	ClaudeArgs                      []string
+	CodexArgs                       []string
+	CodebuddyArgs                   []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -121,14 +123,15 @@ type Overrides struct {
 	HeartbeatInterval time.Duration
 	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
 	// distinguishable from "flag not passed". nil = use env/default.
-	AgentTimeout                   *time.Duration
-	CodexSemanticInactivityTimeout time.Duration
-	MaxConcurrentTasks             int
-	DaemonID                       string
-	DeviceName                     string
-	RuntimeName                    string
-	Profile                        string // profile name (empty = default)
-	HealthPort                     int    // health check port (0 = use default)
+	AgentTimeout                    *time.Duration
+	CodexSemanticInactivityTimeout  time.Duration
+	CodexFirstTurnNoProgressTimeout time.Duration
+	MaxConcurrentTasks              int
+	DaemonID                        string
+	DeviceName                      string
+	RuntimeName                     string
+	Profile                         string // profile name (empty = default)
+	HealthPort                      int    // health check port (0 = use default)
 	// DisableAutoUpdate, when true, forces the auto-update poller off. There
 	// is no symmetric "force on" override because the env/default already
 	// resolves to enabled; the flag exists so users can opt out from the CLI.
@@ -360,6 +363,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		codexSemanticInactivityTimeout = overrides.CodexSemanticInactivityTimeout
 	}
 
+	codexFirstTurnNoProgressTimeout, err := durationFromEnv("MULTICA_CODEX_FIRST_TURN_NO_PROGRESS_TIMEOUT", DefaultCodexFirstTurnNoProgressTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.CodexFirstTurnNoProgressTimeout > 0 {
+		codexFirstTurnNoProgressTimeout = overrides.CodexFirstTurnNoProgressTimeout
+	}
+
 	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
@@ -499,35 +510,36 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	return Config{
-		ServerBaseURL:                  serverBaseURL,
-		DaemonID:                       daemonID,
-		LegacyDaemonIDs:                legacyDaemonIDs,
-		DeviceName:                     deviceName,
-		RuntimeName:                    runtimeName,
-		Profile:                        profile,
-		Agents:                         agents,
-		WorkspacesRoot:                 workspacesRoot,
-		KeepEnvAfterTask:               keepEnv,
-		GCEnabled:                      gcEnabled,
-		GCInterval:                     gcInterval,
-		GCTTL:                          gcTTL,
-		GCOrphanTTL:                    gcOrphanTTL,
-		GCArtifactTTL:                  gcArtifactTTL,
-		GCArtifactPatterns:             gcArtifactPatterns,
-		AutoUpdateEnabled:              autoUpdateEnabled,
-		AutoUpdateCheckInterval:        autoUpdateInterval,
-		HealthPort:                     healthPort,
-		MaxConcurrentTasks:             maxConcurrentTasks,
-		PollInterval:                   pollInterval,
-		HeartbeatInterval:              heartbeatInterval,
-		AgentTimeout:                   agentTimeout,
-		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
-		AgentIdleWatchdog:              agentIdleWatchdog,
-		AgentToolWatchdog:              agentToolWatchdog,
-		ClaudeArgs:                     claudeArgs,
-		CodexArgs:                      codexArgs,
-		CodebuddyArgs:                  codebuddyArgs,
-		ProfileCommandOverrides:        profileCommandOverrides,
+		ServerBaseURL:                   serverBaseURL,
+		DaemonID:                        daemonID,
+		LegacyDaemonIDs:                 legacyDaemonIDs,
+		DeviceName:                      deviceName,
+		RuntimeName:                     runtimeName,
+		Profile:                         profile,
+		Agents:                          agents,
+		WorkspacesRoot:                  workspacesRoot,
+		KeepEnvAfterTask:                keepEnv,
+		GCEnabled:                       gcEnabled,
+		GCInterval:                      gcInterval,
+		GCTTL:                           gcTTL,
+		GCOrphanTTL:                     gcOrphanTTL,
+		GCArtifactTTL:                   gcArtifactTTL,
+		GCArtifactPatterns:              gcArtifactPatterns,
+		AutoUpdateEnabled:               autoUpdateEnabled,
+		AutoUpdateCheckInterval:         autoUpdateInterval,
+		HealthPort:                      healthPort,
+		MaxConcurrentTasks:              maxConcurrentTasks,
+		PollInterval:                    pollInterval,
+		HeartbeatInterval:               heartbeatInterval,
+		AgentTimeout:                    agentTimeout,
+		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,
+		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
+		AgentIdleWatchdog:               agentIdleWatchdog,
+		AgentToolWatchdog:               agentToolWatchdog,
+		ClaudeArgs:                      claudeArgs,
+		CodexArgs:                       codexArgs,
+		CodebuddyArgs:                   codebuddyArgs,
+		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
 }
 

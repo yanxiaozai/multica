@@ -743,6 +743,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"poll_interval", d.cfg.PollInterval,
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
+		"codex_semantic_inactivity_timeout", d.cfg.CodexSemanticInactivityTimeout,
+		"codex_first_turn_no_progress_timeout", d.cfg.CodexFirstTurnNoProgressTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
@@ -3421,11 +3423,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var specProfile string
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		specProfile = strings.TrimSpace(string(task.Agent.SpecProfile))
 	}
 
 	// Prepare isolated execution environment.
@@ -3441,6 +3445,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:                           agentID,
 		AgentName:                         agentName,
 		AgentInstructions:                 instructions,
+		AgentSpecProfile:                  specProfile,
 		AgentSkills:                       convertSkillsForEnv(skills),
 		Repos:                             convertReposForEnv(task.Repos),
 		ProjectID:                         task.ProjectID,
@@ -3781,17 +3786,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
-		Model:                     model,
-		ThreadName:                deriveTaskThreadName(task),
-		Timeout:                   d.cfg.AgentTimeout,
-		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
-		ResumeSessionID:           task.PriorSessionID,
-		ExtraArgs:                 extraArgs,
-		CustomArgs:                customArgs,
-		McpConfig:                 mcpConfig,
-		ThinkingLevel:             thinkingLevel,
-		OpenclawMode:              openclawMode,
+		Cwd:                        env.WorkDir,
+		Model:                      model,
+		ThreadName:                 deriveTaskThreadName(task),
+		Timeout:                    d.cfg.AgentTimeout,
+		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
+		ResumeSessionID:            task.PriorSessionID,
+		ExtraArgs:                  extraArgs,
+		CustomArgs:                 customArgs,
+		McpConfig:                  mcpConfig,
+		ThinkingLevel:              thinkingLevel,
+		OpenclawMode:               openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
