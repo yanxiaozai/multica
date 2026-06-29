@@ -17,6 +17,7 @@ import {
   Cloud,
   Cpu,
   Filter,
+  FileText,
   Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
@@ -35,7 +36,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { api } from "@multica/core/api";
-import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
+import { useTranscriptViewStore, type TranscriptSortDirection, type TranscriptViewMode } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
@@ -60,6 +61,9 @@ interface AgentTranscriptDialogProps {
 // ─── Color mapping for timeline segments ────────────────────────────────────
 
 type EventColor = "agent" | "thinking" | "tool" | "result" | "error";
+type ChangedFileSummary = { path: string; sourceSeq: number };
+
+const MAX_CHANGED_FILE_SUMMARY = 20;
 
 function getEventColor(item: TimelineItem): EventColor {
   switch (item.type) {
@@ -165,6 +169,106 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}m ${secs}s`;
 }
 
+function normalizePathCandidate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 240) return null;
+  if (/[\n\r{}]/.test(trimmed)) return null;
+  if (trimmed === "/dev/null") return null;
+  return trimmed.replace(/^["']|["']$/g, "");
+}
+
+function collectInputPaths(input: Record<string, unknown> | undefined): string[] {
+  if (!input) return [];
+  const paths: string[] = [];
+  const pathKeys = ["path", "file_path", "filepath", "file", "filename", "target_file", "destination_path"];
+  for (const key of pathKeys) {
+    const value = input[key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const path = normalizePathCandidate(item);
+        if (path) paths.push(path);
+      }
+      continue;
+    }
+    const path = normalizePathCandidate(value);
+    if (path) paths.push(path);
+  }
+  return paths;
+}
+
+function isLikelyMutatingTool(item: TimelineItem): boolean {
+  const tool = item.tool?.toLowerCase() ?? "";
+  if (/(write|edit|patch|apply|create|delete|remove|rename|move|update)/.test(tool)) return true;
+  const input = item.input ?? {};
+  return ["old_string", "new_string", "oldText", "newText", "content", "patch", "edits"].some((key) => key in input);
+}
+
+function extractPatchPaths(text: string | undefined): string[] {
+  if (!text) return [];
+  const paths: string[] = [];
+  const patterns = [
+    /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm,
+    /^\+\+\+ (?!\/dev\/null$)(?:b\/)?(.+)$/gm,
+    /^--- (?!\/dev\/null$)(?:a\/)?(.+)$/gm,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const path = normalizePathCandidate(match[1]);
+      if (path) paths.push(path);
+    }
+  }
+  return paths;
+}
+
+function extractChangedFiles(items: TimelineItem[]): ChangedFileSummary[] {
+  const seen = new Set<string>();
+  const files: ChangedFileSummary[] = [];
+  const add = (path: string, sourceSeq: number) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    files.push({ path, sourceSeq });
+  };
+
+  for (const item of items) {
+    if (item.type === "tool_use" && isLikelyMutatingTool(item)) {
+      for (const path of collectInputPaths(item.input)) add(path, item.seq);
+      for (const value of Object.values(item.input ?? {})) {
+        if (typeof value === "string") {
+          for (const path of extractPatchPaths(value)) add(path, item.seq);
+        }
+      }
+    }
+    if (item.type === "tool_result") {
+      for (const path of extractPatchPaths(item.output)) add(path, item.seq);
+    }
+    if (files.length >= MAX_CHANGED_FILE_SUMMARY) break;
+  }
+
+  return files;
+}
+
+function formatRawTranscriptText(items: TimelineItem[], changedFiles: ChangedFileSummary[]): string {
+  const lines: string[] = [];
+  for (const item of items) {
+    if (item.type === "text" && item.content) {
+      lines.push(item.content.trimEnd());
+    } else if (item.type === "thinking" && item.content) {
+      lines.push(`[Thinking]\n${item.content.trimEnd()}`);
+    } else if (item.type === "tool_use") {
+      lines.push(`[Tool: ${item.tool ?? "tool"}] ${getEventSummary(item)}`);
+    } else if (item.type === "tool_result" && item.output) {
+      lines.push(`[Tool result: ${item.tool ?? "tool"}]\n${item.output.trimEnd()}`);
+    } else if (item.type === "error" && item.content) {
+      lines.push(`[Error]\n${item.content.trimEnd()}`);
+    }
+  }
+  if (changedFiles.length > 0) {
+    lines.push("", "Changed files:", ...changedFiles.map((file) => `- ${file.path}`));
+  }
+  return lines.filter((line, index, arr) => line !== "" || arr[index - 1] !== "").join("\n\n");
+}
+
 // ─── Main dialog ────────────────────────────────────────────────────────────
 
 export function AgentTranscriptDialog({
@@ -186,6 +290,8 @@ export function AgentTranscriptDialog({
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
+  const viewMode = useTranscriptViewStore((s) => s.viewMode);
+  const setViewMode = useTranscriptViewStore((s) => s.setViewMode);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -223,10 +329,12 @@ export function AgentTranscriptDialog({
   // Apply user-chosen sort direction. Reverse is a pure presentation concern —
   // the underlying timeline (and its seq numbers) is untouched, so copy/filter
   // and segment navigation continue to work against the same data.
+  const activeItems = viewMode === "events" ? filteredItems : items;
   const displayItems = useMemo(
-    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
-    [filteredItems, sortDirection],
+    () => (sortDirection === "newest_first" ? [...activeItems].reverse() : activeItems),
+    [activeItems, sortDirection],
   );
+  const changedFiles = useMemo(() => extractChangedFiles(items), [items]);
 
   // Toggling direction is a manual user action; jump the scroll container back
   // to the top so the newest end of the timeline (per the chosen direction) is
@@ -289,19 +397,21 @@ export function AgentTranscriptDialog({
   }, [task.relative_work_dir]);
 
   const handleCopyAll = useCallback(() => {
-    const text = displayItems
-      .map((item) => {
-        const label = getEventLabel(item);
-        const summary = getEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
-      .join("\n");
+    const text = viewMode === "raw"
+      ? formatRawTranscriptText(displayItems, changedFiles)
+      : displayItems
+        .map((item) => {
+          const label = getEventLabel(item);
+          const summary = getEventSummary(item);
+          return `[${label}] ${summary}`;
+        })
+        .join("\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [displayItems]);
+  }, [changedFiles, displayItems, viewMode]);
 
   // Toggle tool filter
   const toggleTool = useCallback((tool: string) => {
@@ -375,6 +485,15 @@ export function AgentTranscriptDialog({
             {statusBadge}
 
             <div className="ml-auto flex items-center gap-1">
+              <ViewModeToggle
+                value={viewMode}
+                onChange={setViewMode}
+                labels={{
+                  events: t(($) => $.transcript.view_events),
+                  raw: t(($) => $.transcript.view_raw),
+                  ariaLabel: t(($) => $.transcript.view_label),
+                }}
+              />
               {items.length > 1 && (
                 <SortDirectionToggle
                   value={sortDirection}
@@ -386,7 +505,7 @@ export function AgentTranscriptDialog({
                   }}
                 />
               )}
-              {filterOptions.length > 0 && (
+              {viewMode === "events" && filterOptions.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     className={cn(
@@ -481,7 +600,7 @@ export function AgentTranscriptDialog({
               <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
             )}
             <MetadataChip>
-              {selectedTools.size > 0
+              {viewMode === "events" && selectedTools.size > 0
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
@@ -526,7 +645,7 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
-        {displayItems.length > 0 && (
+        {viewMode === "events" && displayItems.length > 0 && (
           <div className="border-b px-4 py-2.5 shrink-0">
             <TimelineBar
               items={displayItems}
@@ -560,19 +679,23 @@ export function AgentTranscriptDialog({
               )}
             </div>
           ) : (
-            <div className="divide-y">
-              {displayItems.map((item) => (
-                <TranscriptEventRow
-                  key={item.seq}
-                  ref={(el) => {
-                    if (el) eventRefs.current.set(item.seq, el);
-                    else eventRefs.current.delete(item.seq);
-                  }}
-                  item={item}
-                  isSelected={selectedSeq === item.seq}
-                />
-              ))}
-            </div>
+            viewMode === "raw" ? (
+              <RawTranscriptView items={displayItems} changedFiles={changedFiles} />
+            ) : (
+              <div className="divide-y">
+                {displayItems.map((item) => (
+                  <TranscriptEventRow
+                    key={item.seq}
+                    ref={(el) => {
+                      if (el) eventRefs.current.set(item.seq, el);
+                      else eventRefs.current.delete(item.seq);
+                    }}
+                    item={item}
+                    isSelected={selectedSeq === item.seq}
+                  />
+                ))}
+              </div>
+            )
           )}
         </div>
       </DialogContent>
@@ -816,6 +939,171 @@ const TranscriptEventRow = ({
     </div>
   );
 };
+
+interface ViewModeToggleProps {
+  value: TranscriptViewMode;
+  onChange: (mode: TranscriptViewMode) => void;
+  labels: { events: string; raw: string; ariaLabel: string };
+}
+
+function ViewModeToggle({ value, onChange, labels }: ViewModeToggleProps) {
+  return (
+    <div
+      role="group"
+      aria-label={labels.ariaLabel}
+      className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "events"}
+        title={labels.events}
+        onClick={() => onChange("events")}
+        className={cn(
+          "rounded px-1.5 py-0.5 transition-colors",
+          value === "events"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {labels.events}
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "raw"}
+        title={labels.raw}
+        onClick={() => onChange("raw")}
+        className={cn(
+          "rounded px-1.5 py-0.5 transition-colors",
+          value === "raw"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {labels.raw}
+      </button>
+    </div>
+  );
+}
+
+function RawTranscriptView({
+  items,
+  changedFiles,
+}: {
+  items: TimelineItem[];
+  changedFiles: ChangedFileSummary[];
+}) {
+  const { t } = useT("agents");
+
+  return (
+    <div className="space-y-4 px-5 py-4">
+      {items.map((item) => {
+        if (item.type === "text") return <RawTextBlock key={item.seq} item={item} />;
+        if (item.type === "thinking") return <RawThinkingBlock key={item.seq} item={item} />;
+        if (item.type === "tool_use") return <RawToolBlock key={item.seq} item={item} />;
+        if (item.type === "tool_result") return <RawToolResultBlock key={item.seq} item={item} />;
+        return <RawErrorBlock key={item.seq} item={item} />;
+      })}
+
+      {changedFiles.length > 0 && (
+        <section className="rounded-md border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <FileText className="h-3.5 w-3.5" />
+            {t(($) => $.transcript.changed_files)}
+          </div>
+          <div className="space-y-1">
+            {changedFiles.map((file) => (
+              <div key={file.path} className="font-mono text-xs text-foreground">
+                {file.path}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function RawTextBlock({ item }: { item: TimelineItem }) {
+  if (!item.content) return null;
+  return (
+    <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+      {item.content}
+    </pre>
+  );
+}
+
+function RawThinkingBlock({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  if (!item.content) return null;
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex items-center gap-1.5 rounded text-xs font-medium text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3 w-3" />
+        <Brain className="h-3 w-3" />
+        {t(($) => $.transcript.thinking)}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-2 max-h-60 overflow-auto rounded border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+          {item.content}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function RawToolBlock({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  const summary = getEventSummary(item);
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex max-w-full items-center gap-1.5 rounded text-xs text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span className="font-medium">{item.tool ?? t(($) => $.transcript.tool)}</span>
+        {summary && <span className="truncate font-mono">{summary}</span>}
+      </CollapsibleTrigger>
+      {item.input && Object.keys(item.input).length > 0 && (
+        <CollapsibleContent>
+          <pre className="mt-2 max-h-60 overflow-auto rounded border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-all">
+            {redactSecrets(JSON.stringify(item.input, null, 2))}
+          </pre>
+        </CollapsibleContent>
+      )}
+    </Collapsible>
+  );
+}
+
+function RawToolResultBlock({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  if (!item.output) return null;
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex max-w-full items-center gap-1.5 rounded text-xs text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span className="font-medium">{t(($) => $.transcript.tool_result, { tool: item.tool ?? t(($) => $.transcript.tool) })}</span>
+        <span className="truncate">{item.output.slice(0, 160)}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-2 max-h-80 overflow-auto rounded border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-all">
+          {item.output.length > 4000
+            ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
+            : redactSecrets(item.output)}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function RawErrorBlock({ item }: { item: TimelineItem }) {
+  if (!item.content) return null;
+  return (
+    <pre className="rounded border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive whitespace-pre-wrap break-words">
+      {item.content}
+    </pre>
+  );
+}
 
 // ─── Event detail content ───────────────────────────────────────────────────
 

@@ -14,4 +14,5 @@ export {
 export {
   useTranscriptViewStore,
   type TranscriptSortDirection,
+  type TranscriptViewMode,
 } from "./transcript-view-store";
