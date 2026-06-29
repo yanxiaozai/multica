@@ -275,6 +275,29 @@
       "upload_failed_toast": "Avatar upload failed"
     }
   },
+  "import_button": {
+    "label": "Import from Claude Code"
+  },
+  "import_dialog": {
+    "title": "Import from Claude Code",
+    "description": "Import sub-agents from your local ~/.claude/agents/ folder. Each becomes a workspace agent with the same name, description, and instructions.",
+    "list_label": "Agents",
+    "loading": "Reading local agents…",
+    "empty": "No Claude Code agents found in ~/.claude/agents/. Install or run Claude Code first.",
+    "select_all": "Select all",
+    "deselect_all": "Deselect all",
+    "body_chars_one": "{{count}} character",
+    "body_chars_other": "{{count}} characters",
+    "selected_count_one": "{{count}} selected",
+    "selected_count_other": "{{count}} selected",
+    "import_one": "Import {{count}} agent",
+    "import_other": "Import {{count}} agents",
+    "importing": "Importing…",
+    "toast_success_one": "Imported {{count}} agent",
+    "toast_success_other": "Imported {{count}} agents",
+    "toast_partial_failure_one": "{{count}} agent failed to import (may already exist): {{names}}",
+    "toast_partial_failure_other": "{{count}} agents failed to import (may already exist): {{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "Save",

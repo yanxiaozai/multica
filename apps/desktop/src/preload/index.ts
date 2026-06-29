@@ -180,6 +180,11 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Read `remote.origin.url` for a local git working tree. Powers the
+   *  project GitLab panel's auto-detect. ok=false with a typed reason when the
+   *  path isn't a repo, has no origin, or git is missing. */
+  detectGitRemote: (path: string) =>
+    ipcRenderer.invoke("local-directory:detect-git-remote", path),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
@@ -192,6 +197,10 @@ const desktopAPI = {
   },
   /** Ask the main process to close the window (used after closing the last tab). */
   closeWindow: () => ipcRenderer.send("window:close"),
+  /** Read every `~/.claude/agents/*.md` file. Powers "Import from Claude Code"
+   *  on the Agents page. Empty list when the directory is missing. */
+  listClaudeAgentFiles: (): Promise<{ fileName: string; rawContent: string }[]> =>
+    ipcRenderer.invoke("claude-agents:list"),
 };
 
 interface DaemonStatus {

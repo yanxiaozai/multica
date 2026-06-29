@@ -275,6 +275,24 @@
       "upload_failed_toast": "아바타 업로드 실패"
     }
   },
+  "import_button": {
+    "label": "Claude Code에서 가져오기"
+  },
+  "import_dialog": {
+    "title": "Claude Code에서 가져오기",
+    "description": "로컬 ~/.claude/agents/ 폴더에서 하위 에이전트를 가져옵니다. 각 에이전트는 같은 이름의 워크스페이스 에이전트가 되며 설명과 instructions가 유지됩니다.",
+    "list_label": "에이전트",
+    "loading": "로컬 에이전트를 읽는 중…",
+    "empty": "~/.claude/agents/에서 Claude Code 에이전트를 찾을 수 없습니다. 먼저 Claude Code를 설치하거나 실행하세요.",
+    "select_all": "모두 선택",
+    "deselect_all": "선택 해제",
+    "body_chars_other": "{{count}}자",
+    "selected_count_other": "{{count}}개 선택됨",
+    "import_other": "{{count}}개 에이전트 가져오기",
+    "importing": "가져오는 중…",
+    "toast_success_other": "{{count}}개 에이전트를 가져왔습니다",
+    "toast_partial_failure_other": "{{count}}개 에이전트 가져오기에 실패했습니다 (이미 존재할 수 있음): {{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "저장",

@@ -6,6 +6,7 @@ import {
   Archive,
   ArchiveRestore,
   Bot,
+  Download,
   Loader2,
   Lock,
   Plus,
@@ -14,6 +15,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
+import { isClaudeAgentImportSupported } from "../../platform";
 import type {
   Agent,
   AgentRuntime,
@@ -77,6 +79,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
+import { ImportClaudeAgentsDialog } from "./import-claude-agents-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import { AgentListToolbar } from "./agent-list-toolbar";
 import { useT } from "../../i18n";
@@ -180,9 +183,13 @@ export interface AgentsPageProps {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onImport,
+  showImport,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onImport: () => void;
+  showImport: boolean;
 }) {
   const { t } = useT("agents");
   return (
@@ -207,19 +214,37 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      {/* Quiet chrome button (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-        aria-label={t(($) => $.page.new_agent)}
-        onClick={onCreate}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
-      </Button>
+      <div className="flex items-center gap-2">
+        {/* Desktop-only: import sub-agents from ~/.claude/agents/. Hidden on
+            web where the file reader bridge isn't available. */}
+        {showImport && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 px-2.5"
+            onClick={onImport}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.import_button.label)}
+            </span>
+          </Button>
+        )}
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.new_agent)}
+          onClick={onCreate}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
+        </Button>
+      </div>
     </PageHeader>
   );
 }
@@ -236,7 +261,12 @@ function ListError({
   const { t } = useT("agents");
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={0} onCreate={onCreate} />
+      <PageHeaderBar
+        totalCount={0}
+        onCreate={onCreate}
+        onImport={() => {}}
+        showImport={false}
+      />
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
         <AlertCircle className="h-8 w-8 text-destructive" />
         <div>
@@ -812,7 +842,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
+  // Desktop-only affordance: the file reader for ~/.claude/agents/ only exists
+  // in the Electron preload. Web renders never show the import button.
+  const claudeImportSupported = isClaudeAgentImportSupported();
+
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
@@ -1060,6 +1095,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setShowCreate(true)}
+        onImport={() => setShowImport(true)}
+        showImport={claudeImportSupported}
       />
 
       {isLoading ? (
@@ -1218,6 +1255,16 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             setDuplicateTemplate(null);
           }}
           onCreate={handleCreate}
+        />
+      )}
+
+      {showImport && (
+        <ImportClaudeAgentsDialog
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          onClose={() => setShowImport(false)}
         />
       )}
     </div>

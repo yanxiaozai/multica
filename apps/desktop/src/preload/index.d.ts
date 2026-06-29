@@ -78,11 +78,25 @@ interface DesktopAPI {
       | "error";
     error?: string;
   }>;
+  /** Read `remote.origin.url` for a local git working tree. Powers the project
+   *  GitLab panel's auto-detect from a `local_directory` resource. */
+  detectGitRemote: (path: string) => Promise<{
+    ok: boolean;
+    remote_url?: string;
+    reason?: "not_absolute" | "not_git_repo" | "no_origin" | "git_not_found" | "error";
+    error?: string;
+  }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;
   /** Ask the main process to close the window. */
   closeWindow: () => void;
+  /** Read every `~/.claude/agents/*.md` file off disk. Powers the
+   *  "Import from Claude Code" entry on the Agents page. Returns [] when the
+   *  directory is missing (e.g. Claude Code was never run on this machine). */
+  listClaudeAgentFiles: () => Promise<
+    { fileName: string; rawContent: string }[]
+  >;
 }
 
 interface DaemonStatus {

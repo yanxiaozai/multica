@@ -269,6 +269,24 @@
       "upload_failed_toast": "头像上传失败"
     }
   },
+  "import_button": {
+    "label": "从 Claude Code 导入"
+  },
+  "import_dialog": {
+    "title": "从 Claude Code 导入",
+    "description": "从本地 ~/.claude/agents/ 目录导入子 agent，每个会成为同名的 workspace 智能体，并保留描述与 instructions。",
+    "list_label": "智能体",
+    "loading": "正在读取本地 agent…",
+    "empty": "未在 ~/.claude/agents/ 找到 Claude Code agent，请先安装或运行 Claude Code。",
+    "select_all": "全选",
+    "deselect_all": "取消全选",
+    "body_chars_other": "{{count}} 个字符",
+    "selected_count_other": "已选 {{count}} 个",
+    "import_other": "导入 {{count}} 个智能体",
+    "importing": "导入中…",
+    "toast_success_other": "已导入 {{count}} 个智能体",
+    "toast_partial_failure_other": "{{count}} 个智能体导入失败（可能已存在）：{{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "保存",
