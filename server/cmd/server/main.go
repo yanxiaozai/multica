@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/issuebridge"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
@@ -412,6 +413,15 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}
+	// GitLab issue polling. Only active when IssueBridgeService has both a
+	// SecretBox (token ops) and an injected IssueService (issue creation) —
+	// otherwise SyncDueConfigs no-ops on an empty due-config list. Per-config
+	// poll_interval_seconds gates actual work; the 1m cadence just polls.
+	if h.IssueBridgeService != nil {
+		if err := schedulerMgr.Register(scheduler.IssueSyncPollJob(issueSyncRunnerAdapter{h.IssueBridgeService})); err != nil {
+			slog.Warn("scheduler: failed to register issue_sync_poll job", "error", err)
+		}
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()
@@ -488,4 +498,26 @@ func main() {
 		metricsShutdownCancel()
 	}
 	slog.Info("server stopped")
+}
+
+// issueSyncRunnerAdapter bridges *issuebridge.Service (which returns its own
+// PollStats) to the scheduler's IssueSyncRunner interface (which returns
+// scheduler.IssueSyncStats). Keeps the two packages decoupled — the scheduler
+// never imports issuebridge, mirroring the autopilot dispatcher pattern.
+type issueSyncRunnerAdapter struct {
+	s *issuebridge.Service
+}
+
+func (a issueSyncRunnerAdapter) SyncDueConfigs(ctx context.Context) (scheduler.IssueSyncStats, error) {
+	st, err := a.s.SyncDueConfigs(ctx)
+	if err != nil {
+		return scheduler.IssueSyncStats{}, err
+	}
+	return scheduler.IssueSyncStats{
+		Configs:    st.Configs,
+		Imported:   st.Imported,
+		Skipped:    st.Skipped,
+		Failed:     st.Failed,
+		ErrConfigs: st.ErrConfigs,
+	}, nil
 }

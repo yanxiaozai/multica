@@ -41,6 +41,7 @@ import type {
   UpdateIssueIntegrationRequest,
   TestIssueIntegrationResponse,
   UpsertIssueSyncConfigRequest,
+  ProjectGitLabImportResult,
   Reaction,
   IssueReaction,
   Workspace,
@@ -1027,6 +1028,34 @@ export class ApiClient {
       issueBridgePath(`/api/issue-sync-configs/${encodeURIComponent(id)}`, params),
       issueBridgeInit(params, { method: "DELETE" }),
     );
+  }
+
+  /** One-shot import of GitLab issues assigned to the connection owner into a
+   *  project. Requires the project to have a GitLab sync config. Idempotent —
+   *  re-runs skip already-imported issues. Returns per-pass tallies. */
+  async importProjectGitLabIssues(
+    projectId: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<ProjectGitLabImportResult> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath(
+        `/api/projects/${encodeURIComponent(projectId)}/gitlab/import-issues`,
+        params,
+      ),
+      issueBridgeInit(params, { method: "POST" }),
+    );
+    // Defensive parse: the tally shape is small and flat; coerce numbers and
+    // cap the errors list so a malformed body can't blow up the UI.
+    const body = (raw ?? {}) as Record<string, unknown>;
+    const errors = Array.isArray(body.errors)
+      ? body.errors.filter((e): e is string => typeof e === "string").slice(0, 20)
+      : [];
+    return {
+      imported: typeof body.imported === "number" ? body.imported : 0,
+      skipped: typeof body.skipped === "number" ? body.skipped : 0,
+      failed: typeof body.failed === "number" ? body.failed : 0,
+      errors,
+    };
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {

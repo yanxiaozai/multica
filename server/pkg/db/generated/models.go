@@ -479,6 +479,19 @@ type Issue struct {
 	Stage              pgtype.Int4        `json:"stage"`
 }
 
+type IssueBridgeItem struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	IntegrationID    pgtype.UUID        `json:"integration_id"`
+	RemoteProjectRef string             `json:"remote_project_ref"`
+	RemoteIid        int64              `json:"remote_iid"`
+	RemoteUrl        string             `json:"remote_url"`
+	RemoteUpdatedAt  pgtype.Timestamptz `json:"remote_updated_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`

@@ -165,7 +165,7 @@ func TestTestIssueIntegrationReturnsGitLabUser(t *testing.T) {
 	}))
 	t.Cleanup(gitlabServer.Close)
 	svc := issuebridge.NewService(testHandler.Queries, handlerIssueBridgeTestBox{})
-	svc.ClientFactory = func(baseURL, token string) (issuebridge.GitLabConnectionTester, error) {
+	svc.ClientFactory = func(baseURL, token string) (issuebridge.GitLabClientAPI, error) {
 		return issuebridge.NewGitLabClientWithHTTPClient(baseURL, token, gitlabServer.Client())
 	}
 	withIssueBridgeService(t, svc)

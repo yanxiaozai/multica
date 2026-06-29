@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -173,6 +174,67 @@ func TestGitLabClientNon2xxFails(t *testing.T) {
 	}
 }
 
+// TestListProjectIssuesPaginatesAndAppliesScope verifies the client follows
+// GitLab's X-Next-Page header, URL-encodes the project ref, and forwards the
+// assigned_to_me scope + bearer token the import path relies on.
+func TestListProjectIssuesPaginatesAndAppliesScope(t *testing.T) {
+	ctx := context.Background()
+	var (
+		gotPaths   []string
+		gotScopes  []string
+		gotAuth    string
+		gotEscaped string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		gotScopes = append(gotScopes, r.URL.Query().Get("scope"))
+		gotAuth = r.Header.Get("Authorization")
+		// EscapedPath preserves the %2F encoding of the project ref;
+		// r.URL.Path is the decoded form (slashes) and would hide whether
+		// we actually encoded "group/sub/proj" as a single path segment.
+		gotEscaped = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		page := r.URL.Query().Get("page")
+		if page == "" || page == "1" {
+			w.Header().Set("X-Next-Page", "2")
+			_, _ = w.Write([]byte(`[{"iid":1,"title":"a","state":"opened","updated_at":"2026-01-01T00:00:00Z"}]`))
+			return
+		}
+		// page 2: short page → stop pagination.
+		_, _ = w.Write([]byte(`[{"iid":2,"title":"b","state":"closed","updated_at":"2026-01-02T00:00:00Z"}]`))
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewGitLabClientWithHTTPClient(server.URL, "tok", server.Client())
+	if err != nil {
+		t.Fatalf("NewGitLabClient: %v", err)
+	}
+	issues, err := client.ListProjectIssues(ctx, "group/sub/proj", ListIssuesOpts{AssignedToMe: true})
+	if err != nil {
+		t.Fatalf("ListProjectIssues: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues across pages, got %d", len(issues))
+	}
+	if len(gotPaths) != 2 {
+		t.Fatalf("expected 2 paginated requests, got %d", len(gotPaths))
+	}
+	if gotAuth != "Bearer tok" {
+		t.Errorf("auth = %q", gotAuth)
+	}
+	for _, s := range gotScopes {
+		if s != "assigned_to_me" {
+			t.Errorf("scope = %q, want assigned_to_me", s)
+		}
+	}
+	// The project ref's slashes must be percent-encoded in the request path
+	// so GitLab routes it as a single project ref (group/sub/proj), not 3
+	// unrelated path segments.
+	if !strings.Contains(gotEscaped, "/projects/group%2Fsub%2Fproj/issues") {
+		t.Errorf("project ref not URL-encoded in path: %s", gotEscaped)
+	}
+}
+
 func TestValidatePollInterval(t *testing.T) {
 	if got, err := ValidatePollInterval(0); err != nil || got != DefaultPollIntervalSeconds {
 		t.Fatalf("default interval got %d err %v", got, err)
@@ -267,6 +329,34 @@ func (f *fakeQueries) DeleteIssueIntegration(context.Context, db.DeleteIssueInte
 	return pgtype.UUID{}, errors.New("not implemented")
 }
 
+// Import-path queries are exercised by sync_test.go via a richer fake; these
+// stubs just keep fakeQueries satisfying the expanded Queries interface.
+func (f *fakeQueries) GetIssueSyncConfigByScope(context.Context, db.GetIssueSyncConfigByScopeParams) (db.IssueSyncConfig, error) {
+	return db.IssueSyncConfig{}, pgx.ErrNoRows
+}
+
+func (f *fakeQueries) GetIssueBridgeItemByRemote(context.Context, db.GetIssueBridgeItemByRemoteParams) (db.IssueBridgeItem, error) {
+	return db.IssueBridgeItem{}, pgx.ErrNoRows
+}
+
+func (f *fakeQueries) CreateIssueBridgeItem(context.Context, db.CreateIssueBridgeItemParams) (db.IssueBridgeItem, error) {
+	return db.IssueBridgeItem{}, errors.New("not implemented")
+}
+
+// Polling-path queries (Phase B). Stubs; the real coverage is in
+// sync_poll_test.go via pollTestQueries.
+func (f *fakeQueries) ListDueIssueSyncConfigs(context.Context) ([]db.IssueSyncConfig, error) {
+	return nil, nil
+}
+
+func (f *fakeQueries) MarkIssueSyncPollSuccess(context.Context, pgtype.UUID) (db.IssueSyncConfig, error) {
+	return db.IssueSyncConfig{}, errors.New("not implemented")
+}
+
+func (f *fakeQueries) MarkIssueSyncPollFailure(context.Context, db.MarkIssueSyncPollFailureParams) (db.IssueSyncConfig, error) {
+	return db.IssueSyncConfig{}, errors.New("not implemented")
+}
+
 type fakeSecretBox struct{}
 
 func (fakeSecretBox) Seal(plaintext []byte) ([]byte, error) {
@@ -286,5 +376,54 @@ func testUUID(last byte) pgtype.UUID {
 	return pgtype.UUID{
 		Bytes: [16]byte{15: last},
 		Valid: true,
+	}
+}
+
+func TestNormalizeProjectRef(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"group/proj", "group/proj"},
+		{"  group/proj  ", "group/proj"},
+		{"/group/proj/", "group/proj"},
+		{"group/proj.git", "group/proj"},
+		{"https://gitlab.example.com/group/proj", "group/proj"},
+		{"https://gitlab.example.com/group/sub/proj/-/issues", "group/sub/proj"},
+		{"https://gitlab.com/group/proj.git", "group/proj"},
+		{"", ""},
+		{"   ", ""},
+		{"42", "42"}, // numeric project id passes through
+	}
+	for _, c := range cases {
+		if got := NormalizeProjectRef(c.in); got != c.want {
+			t.Errorf("NormalizeProjectRef(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestListProjectIssuesSurfaces404Body confirms a 404 carries GitLab's actual
+// message body + the actionable hint, not a bare "status 404".
+func TestListProjectIssuesSurfaces404Body(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"404 Project Not Found"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewGitLabClientWithHTTPClient(server.URL, "tok", server.Client())
+	if err != nil {
+		t.Fatalf("NewGitLabClient: %v", err)
+	}
+	_, err = client.ListProjectIssues(context.Background(), "group/missing", ListIssuesOpts{})
+	if err == nil {
+		t.Fatal("expected 404 error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "404") {
+		t.Errorf("error missing status: %q", msg)
+	}
+	if !strings.Contains(msg, "404 Project Not Found") {
+		t.Errorf("error missing GitLab body: %q", msg)
+	}
+	if !strings.Contains(msg, "token can access") {
+		t.Errorf("error missing access hint: %q", msg)
 	}
 }

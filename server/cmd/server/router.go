@@ -449,6 +449,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("issue bridge token storage disabled (MULTICA_ISSUE_BRIDGE_SECRET_KEY not set)")
 	}
 	h.IssueBridgeService = issuebridge.NewService(queries, issueBridgeBox)
+	// Wire issue creation into the bridge so ImportProjectIssues can mint
+	// local issues with proper numbering / WS events / on-assign enqueue.
+	// IssueService is constructed earlier in this composition root.
+	if h.IssueService != nil {
+		h.IssueBridgeService.SetIssueService(h.IssueService)
+	}
 
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
@@ -882,9 +888,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					// One-shot import of GitLab issues assigned to the
+					// connection owner into this project.
+					r.Post("/gitlab/import-issues", h.ImportProjectGitLabIssues)
 				})
 			})
-
 
 			// Spec Memory
 			r.Route("/api/spec", func(r chi.Router) {

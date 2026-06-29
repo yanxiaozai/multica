@@ -1,5 +1,6 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { issueKeys } from "../issues/queries";
 import type {
   CreateGitLabIssueIntegrationRequest,
   UpdateIssueIntegrationRequest,
@@ -110,6 +111,34 @@ export function useDeleteIssueSyncConfig(wsId: string) {
     mutationFn: (id: string) =>
       api.deleteIssueSyncConfig(id, { workspace_id: wsId }),
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
+    },
+  });
+}
+
+/** One-shot import of GitLab issues (assigned to the connection owner) into a
+ *  project. Invalidates the issue list caches on settle so the newly created
+ *  issues show up in the importing user's project board / My Issues / Gantt
+ *  without a manual refresh. We can't rely on the issue:created WS event here
+ *  because the server-side import emits a minimal `{issue_id}` payload (no
+ *  full issue object), which the WS dispatcher drops before it can invalidate
+ *  caches — so the mutation does the invalidation itself, mirroring
+ *  useCreateIssue. This only covers the importing client; OTHER clients/tabs
+ *  still won't see imported or polled issues live until they refresh. See the
+ *  TODO(issubreidge-ws) at the IssueService.Create call in
+ *  server/internal/service/issuebridge/sync.go for the proper fix. */
+export function useImportProjectGitLabIssues(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (projectId: string) =>
+      api.importProjectGitLabIssues(projectId, { workspace_id: wsId }),
+    onSettled: () => {
+      // myAll covers BOTH the project board (scope=project:ID) and My Issues.
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       qc.invalidateQueries({ queryKey: issueBridgeKeys.syncConfigs(wsId) });
     },
   });

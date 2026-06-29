@@ -11,6 +11,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createIssueBridgeItem = `-- name: CreateIssueBridgeItem :one
+INSERT INTO issue_bridge_item (
+    workspace_id, issue_id, integration_id,
+    remote_project_ref, remote_iid, remote_url, remote_updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+RETURNING id, workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url, remote_updated_at, created_at, updated_at
+`
+
+type CreateIssueBridgeItemParams struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	IntegrationID    pgtype.UUID        `json:"integration_id"`
+	RemoteProjectRef string             `json:"remote_project_ref"`
+	RemoteIid        int64              `json:"remote_iid"`
+	RemoteUrl        string             `json:"remote_url"`
+	RemoteUpdatedAt  pgtype.Timestamptz `json:"remote_updated_at"`
+}
+
+func (q *Queries) CreateIssueBridgeItem(ctx context.Context, arg CreateIssueBridgeItemParams) (IssueBridgeItem, error) {
+	row := q.db.QueryRow(ctx, createIssueBridgeItem,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.IntegrationID,
+		arg.RemoteProjectRef,
+		arg.RemoteIid,
+		arg.RemoteUrl,
+		arg.RemoteUpdatedAt,
+	)
+	var i IssueBridgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.IntegrationID,
+		&i.RemoteProjectRef,
+		&i.RemoteIid,
+		&i.RemoteUrl,
+		&i.RemoteUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createIssueIntegration = `-- name: CreateIssueIntegration :one
 INSERT INTO issue_integration (
     workspace_id, provider, name, base_url, encrypted_token,
@@ -163,6 +209,36 @@ func (q *Queries) DeleteIssueSyncConfig(ctx context.Context, arg DeleteIssueSync
 	return id, err
 }
 
+const getIssueBridgeItemByRemote = `-- name: GetIssueBridgeItemByRemote :one
+SELECT id, workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url, remote_updated_at, created_at, updated_at FROM issue_bridge_item
+WHERE integration_id = $1 AND remote_iid = $2
+`
+
+type GetIssueBridgeItemByRemoteParams struct {
+	IntegrationID pgtype.UUID `json:"integration_id"`
+	RemoteIid     int64       `json:"remote_iid"`
+}
+
+// Idempotency lookup: has this GitLab issue (integration + iid) already been
+// imported? The UNIQUE(integration_id, remote_iid) constraint backs this.
+func (q *Queries) GetIssueBridgeItemByRemote(ctx context.Context, arg GetIssueBridgeItemByRemoteParams) (IssueBridgeItem, error) {
+	row := q.db.QueryRow(ctx, getIssueBridgeItemByRemote, arg.IntegrationID, arg.RemoteIid)
+	var i IssueBridgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.IntegrationID,
+		&i.RemoteProjectRef,
+		&i.RemoteIid,
+		&i.RemoteUrl,
+		&i.RemoteUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueIntegrationByProviderName = `-- name: GetIssueIntegrationByProviderName :one
 SELECT id, workspace_id, provider, name, base_url, encrypted_token, default_issue_skill_id, polling_enabled, default_poll_interval_seconds, config, created_at, updated_at FROM issue_integration
 WHERE workspace_id = $1 AND provider = $2 AND name = $3
@@ -224,6 +300,46 @@ func (q *Queries) GetIssueIntegrationInWorkspace(ctx context.Context, arg GetIss
 	return i, err
 }
 
+const getIssueSyncConfigByScope = `-- name: GetIssueSyncConfigByScope :one
+SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at FROM issue_sync_config
+WHERE workspace_id = $1 AND scope_type = $2 AND scope_id = $3
+`
+
+type GetIssueSyncConfigByScopeParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ScopeType   string      `json:"scope_type"`
+	ScopeID     pgtype.UUID `json:"scope_id"`
+}
+
+// Loads the sync config that owns a given scope (e.g. the project-scoped
+// config for scope_type='project', scope_id=<project id>). Used by the
+// import path to resolve integration_id / remote_project_ref / state_mapping
+// / auto-assign for a project.
+func (q *Queries) GetIssueSyncConfigByScope(ctx context.Context, arg GetIssueSyncConfigByScopeParams) (IssueSyncConfig, error) {
+	row := q.db.QueryRow(ctx, getIssueSyncConfigByScope, arg.WorkspaceID, arg.ScopeType, arg.ScopeID)
+	var i IssueSyncConfig
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IntegrationID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.RemoteProjectRef,
+		&i.SyncEnabled,
+		&i.PollIntervalSeconds,
+		&i.StateMapping,
+		&i.AutoAssignEnabled,
+		&i.DefaultAssigneeType,
+		&i.DefaultAssigneeID,
+		&i.LastPollAt,
+		&i.LastSuccessfulPollAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueSyncConfigInWorkspace = `-- name: GetIssueSyncConfigInWorkspace :one
 SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at FROM issue_sync_config
 WHERE id = $1 AND workspace_id = $2
@@ -257,6 +373,59 @@ func (q *Queries) GetIssueSyncConfigInWorkspace(ctx context.Context, arg GetIssu
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listDueIssueSyncConfigs = `-- name: ListDueIssueSyncConfigs :many
+SELECT c.id, c.workspace_id, c.integration_id, c.scope_type, c.scope_id, c.remote_project_ref, c.sync_enabled, c.poll_interval_seconds, c.state_mapping, c.auto_assign_enabled, c.default_assignee_type, c.default_assignee_id, c.last_poll_at, c.last_successful_poll_at, c.last_error, c.created_at, c.updated_at FROM issue_sync_config c
+JOIN issue_integration i ON i.id = c.integration_id
+WHERE c.sync_enabled = true
+  AND (
+    c.last_poll_at IS NULL
+    OR c.last_poll_at + (COALESCE(c.poll_interval_seconds, i.default_poll_interval_seconds) * interval '1 second') < now()
+  )
+ORDER BY c.last_poll_at ASC NULLS FIRST, c.created_at ASC
+`
+
+// Picks sync configs whose poll is due now: enabled, and either never polled
+// or past their effective interval. The effective interval falls back to the
+// integration's default when the per-config poll_interval_seconds is NULL.
+// Backs the IssueSyncPoll scheduler job.
+func (q *Queries) ListDueIssueSyncConfigs(ctx context.Context) ([]IssueSyncConfig, error) {
+	rows, err := q.db.Query(ctx, listDueIssueSyncConfigs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueSyncConfig{}
+	for rows.Next() {
+		var i IssueSyncConfig
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IntegrationID,
+			&i.ScopeType,
+			&i.ScopeID,
+			&i.RemoteProjectRef,
+			&i.SyncEnabled,
+			&i.PollIntervalSeconds,
+			&i.StateMapping,
+			&i.AutoAssignEnabled,
+			&i.DefaultAssigneeType,
+			&i.DefaultAssigneeID,
+			&i.LastPollAt,
+			&i.LastSuccessfulPollAt,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listIssueIntegrationsByWorkspace = `-- name: ListIssueIntegrationsByWorkspace :many
@@ -389,6 +558,86 @@ func (q *Queries) ListIssueSyncConfigsByWorkspace(ctx context.Context, workspace
 		return nil, err
 	}
 	return items, nil
+}
+
+const markIssueSyncPollFailure = `-- name: MarkIssueSyncPollFailure :one
+UPDATE issue_sync_config
+SET last_poll_at = now(),
+    last_error = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at
+`
+
+type MarkIssueSyncPollFailureParams struct {
+	ID        pgtype.UUID `json:"id"`
+	LastError string      `json:"last_error"`
+}
+
+// Records a failed poll: last_poll_at advances (so the interval still
+// applies), last_successful_poll_at is preserved, and last_error captures
+// the failure for the UI / next-cycle diagnosis.
+func (q *Queries) MarkIssueSyncPollFailure(ctx context.Context, arg MarkIssueSyncPollFailureParams) (IssueSyncConfig, error) {
+	row := q.db.QueryRow(ctx, markIssueSyncPollFailure, arg.ID, arg.LastError)
+	var i IssueSyncConfig
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IntegrationID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.RemoteProjectRef,
+		&i.SyncEnabled,
+		&i.PollIntervalSeconds,
+		&i.StateMapping,
+		&i.AutoAssignEnabled,
+		&i.DefaultAssigneeType,
+		&i.DefaultAssigneeID,
+		&i.LastPollAt,
+		&i.LastSuccessfulPollAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markIssueSyncPollSuccess = `-- name: MarkIssueSyncPollSuccess :one
+UPDATE issue_sync_config
+SET last_poll_at = now(),
+    last_successful_poll_at = now(),
+    last_error = '',
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at
+`
+
+// Records a successful poll: both watermarks advance to now() and any prior
+// error clears. Split from the failure variant so sqlc infers clean param
+// types (a single CASE-WHEN-$2 query made sqlc type $2 as timestamptz).
+func (q *Queries) MarkIssueSyncPollSuccess(ctx context.Context, id pgtype.UUID) (IssueSyncConfig, error) {
+	row := q.db.QueryRow(ctx, markIssueSyncPollSuccess, id)
+	var i IssueSyncConfig
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IntegrationID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.RemoteProjectRef,
+		&i.SyncEnabled,
+		&i.PollIntervalSeconds,
+		&i.StateMapping,
+		&i.AutoAssignEnabled,
+		&i.DefaultAssigneeType,
+		&i.DefaultAssigneeID,
+		&i.LastPollAt,
+		&i.LastSuccessfulPollAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateIssueIntegration = `-- name: UpdateIssueIntegration :one

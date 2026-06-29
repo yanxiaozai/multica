@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -28,6 +29,14 @@ type Queries interface {
 	CreateIssueIntegration(context.Context, db.CreateIssueIntegrationParams) (db.IssueIntegration, error)
 	UpdateIssueIntegration(context.Context, db.UpdateIssueIntegrationParams) (db.IssueIntegration, error)
 	DeleteIssueIntegration(context.Context, db.DeleteIssueIntegrationParams) (pgtype.UUID, error)
+	// Import / sync path (Phase A onwards).
+	GetIssueSyncConfigByScope(context.Context, db.GetIssueSyncConfigByScopeParams) (db.IssueSyncConfig, error)
+	GetIssueBridgeItemByRemote(context.Context, db.GetIssueBridgeItemByRemoteParams) (db.IssueBridgeItem, error)
+	CreateIssueBridgeItem(context.Context, db.CreateIssueBridgeItemParams) (db.IssueBridgeItem, error)
+	// Polling path (Phase B): pick due configs + record poll watermarks.
+	ListDueIssueSyncConfigs(context.Context) ([]db.IssueSyncConfig, error)
+	MarkIssueSyncPollSuccess(context.Context, pgtype.UUID) (db.IssueSyncConfig, error)
+	MarkIssueSyncPollFailure(context.Context, db.MarkIssueSyncPollFailureParams) (db.IssueSyncConfig, error)
 }
 
 type SecretBox interface {
@@ -39,12 +48,32 @@ type GitLabConnectionTester interface {
 	TestConnection(context.Context) (GitLabUser, error)
 }
 
-type ClientFactory func(baseURL, token string) (GitLabConnectionTester, error)
+// GitLabClientAPI is the full set of GitLab calls the bridge makes:
+// connection testing (settings UI) plus issue listing (import / sync).
+// *GitLabClient satisfies this; tests substitute a fake.
+type GitLabClientAPI interface {
+	GitLabConnectionTester
+	ListProjectIssues(ctx context.Context, projectRef string, opts ListIssuesOpts) ([]GitLabIssue, error)
+}
+
+type ClientFactory func(baseURL, token string) (GitLabClientAPI, error)
+
+// IssueCreator decouples the import path from *service.IssueService so the
+// bridge can create issues (with numbering / position / WS broadcast /
+// on-assign task enqueue) without an import cycle, and so tests can fake it.
+// *service.IssueService satisfies this directly.
+type IssueCreator interface {
+	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+}
 
 type Service struct {
 	Queries       Queries
 	SecretBox     SecretBox
 	ClientFactory ClientFactory
+	// IssueService is injected by the handler wiring (SetIssueService) after
+	// construction. nil disables ImportProjectIssues — the caller gets a
+	// clear "issue service not configured" error.
+	IssueService IssueCreator
 }
 
 func NewService(queries Queries, box SecretBox) *Service {
@@ -52,6 +81,15 @@ func NewService(queries Queries, box SecretBox) *Service {
 		Queries:       queries,
 		SecretBox:     box,
 		ClientFactory: defaultClientFactory,
+	}
+}
+
+// SetIssueService wires the issue-creation dependency. Called once from the
+// server composition root after both services exist; NewService can't take it
+// directly because IssueService is built later and depends on TaskService.
+func (s *Service) SetIssueService(ic IssueCreator) {
+	if s != nil {
+		s.IssueService = ic
 	}
 }
 
@@ -294,6 +332,6 @@ func (s *Service) decryptToken(encrypted string) (string, error) {
 	return string(plain), nil
 }
 
-func defaultClientFactory(baseURL, token string) (GitLabConnectionTester, error) {
+func defaultClientFactory(baseURL, token string) (GitLabClientAPI, error) {
 	return NewGitLabClient(baseURL, token)
 }
