@@ -15,6 +15,9 @@ import (
 // post with `--content-file`) because the shell-layer corruption it guards
 // against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPrompt(task Task, provider string) string {
+	if task.SquadInstructionsGenerationPrompt != "" {
+		return buildSquadInstructionsGenerationPrompt(task)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -39,6 +42,17 @@ func BuildPrompt(task Task, provider string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildSquadInstructionsGenerationPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are generating squad instructions for a Multica squad.\n\n")
+	b.WriteString(task.SquadInstructionsGenerationPrompt)
+	if !strings.HasSuffix(task.SquadInstructionsGenerationPrompt, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("\nReturn only the final markdown for `squad.instructions`. Do not create issues, comments, files, commits, or chat messages.\n")
 	return b.String()
 }
 

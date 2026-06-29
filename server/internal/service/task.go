@@ -603,6 +603,20 @@ type QuickCreateContext struct {
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
 
+// SquadInstructionsGenerationContextType marks an internal task that asks an
+// agent runtime to summarize squad member agent documents into
+// squad.instructions markdown. It intentionally has no issue or chat link; the
+// result is copied into squad_instructions_generation_job on completion.
+const SquadInstructionsGenerationContextType = "squad_instructions_generation"
+
+type SquadInstructionsGenerationContext struct {
+	Type            string `json:"type"`
+	WorkspaceID     string `json:"workspace_id"`
+	SquadID         string `json:"squad_id"`
+	GenerationJobID string `json:"generation_job_id"`
+	Prompt          string `json:"prompt"`
+}
+
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
 // task's context JSONB and the agent is expected to translate it into a
@@ -686,6 +700,48 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+func (s *TaskService) EnqueueSquadInstructionsGenerationTask(ctx context.Context, agent db.Agent, job db.SquadInstructionsGenerationJob, prompt string) (db.AgentTaskQueue, error) {
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := SquadInstructionsGenerationContext{
+		Type:            SquadInstructionsGenerationContextType,
+		WorkspaceID:     util.UUIDToString(job.WorkspaceID),
+		SquadID:         util.UUIDToString(job.SquadID),
+		GenerationJobID: util.UUIDToString(job.ID),
+		Prompt:          prompt,
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal squad instructions generation context: %w", err)
+	}
+
+	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agent.ID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create squad instructions generation task: %w", err)
+	}
+
+	slog.Info("squad instructions generation task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(agent.ID),
+		"squad_id", payload.SquadID,
+		"workspace_id", payload.WorkspaceID,
+		"generation_job_id", payload.GenerationJobID,
+	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
@@ -1027,6 +1083,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
 	s.captureTaskDispatched(ctx, *claimed)
+	s.markSquadInstructionsGenerationRunning(ctx, *claimed)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
 	// working write racing after a just-cancelled claim.
@@ -1094,6 +1151,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			"runtime_id", runtimeKey,
 			"agent_id", util.UUIDToString(stale.AgentID),
 		)
+		s.markSquadInstructionsGenerationRunning(ctx, stale)
 		return &stale, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -1192,6 +1250,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
+	s.markSquadInstructionsGenerationRunning(ctx, task)
 	// Tell every connected workspace WS client that this task transitioned
 	// (dispatched | waiting_local_directory) → running. Without this, the
 	// workspace-wide `agentTaskSnapshot` query only refreshes on the 30s
@@ -1318,6 +1377,13 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+
+	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
+		s.completeSquadInstructionsGenerationTask(ctx, task, gen, result)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+		return &task, nil
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1508,6 +1574,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+
+	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
+		s.failSquadInstructionsGenerationTask(ctx, task, gen, errMsg)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+		return &task, nil
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
@@ -2217,6 +2290,9 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID
 	}
+	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
+		return gen.WorkspaceID
+	}
 	return ""
 }
 
@@ -2408,6 +2484,116 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+func (s *TaskService) parseSquadInstructionsGenerationContext(task db.AgentTaskQueue) (SquadInstructionsGenerationContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	var gen SquadInstructionsGenerationContext
+	if err := json.Unmarshal(task.Context, &gen); err != nil {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	if gen.Type != SquadInstructionsGenerationContextType || gen.GenerationJobID == "" {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	return gen, true
+}
+
+func (s *TaskService) markSquadInstructionsGenerationRunning(ctx context.Context, task db.AgentTaskQueue) {
+	gen, ok := s.parseSquadInstructionsGenerationContext(task)
+	if !ok {
+		return
+	}
+	jobID, err := util.ParseUUID(gen.GenerationJobID)
+	if err != nil {
+		slog.Warn("invalid squad instructions generation job id",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+		return
+	}
+	if _, err := s.Queries.MarkSquadInstructionsGenerationRunning(ctx, jobID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark squad instructions generation running",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+	}
+}
+
+func taskCompletedOutput(result []byte) string {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+}
+
+func (s *TaskService) completeSquadInstructionsGenerationTask(ctx context.Context, task db.AgentTaskQueue, gen SquadInstructionsGenerationContext, result []byte) {
+	jobID, err := util.ParseUUID(gen.GenerationJobID)
+	if err != nil {
+		slog.Warn("invalid squad instructions generation job id",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+		return
+	}
+	body := taskCompletedOutput(result)
+	if body == "" {
+		if _, err := s.Queries.FailSquadInstructionsGenerationJob(ctx, db.FailSquadInstructionsGenerationJobParams{
+			ID:    jobID,
+			Error: pgtype.Text{String: "AI generation completed without output", Valid: true},
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("failed to mark empty squad instructions generation failed",
+				"task_id", util.UUIDToString(task.ID),
+				"generation_job_id", gen.GenerationJobID,
+				"error", err,
+			)
+		}
+		return
+	}
+	if _, err := s.Queries.CompleteSquadInstructionsGenerationJob(ctx, db.CompleteSquadInstructionsGenerationJobParams{
+		ID:           jobID,
+		Instructions: body,
+	}); err != nil {
+		slog.Warn("failed to complete squad instructions generation job",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) failSquadInstructionsGenerationTask(ctx context.Context, task db.AgentTaskQueue, gen SquadInstructionsGenerationContext, errMsg string) {
+	jobID, err := util.ParseUUID(gen.GenerationJobID)
+	if err != nil {
+		slog.Warn("invalid squad instructions generation job id",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+		return
+	}
+	errMsg = strings.TrimSpace(errMsg)
+	if errMsg == "" {
+		errMsg = "AI generation task failed"
+	}
+	if _, err := s.Queries.FailSquadInstructionsGenerationJob(ctx, db.FailSquadInstructionsGenerationJobParams{
+		ID:    jobID,
+		Error: pgtype.Text{String: errMsg, Valid: true},
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to fail squad instructions generation job",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+	}
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

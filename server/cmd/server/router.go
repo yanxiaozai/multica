@@ -891,6 +891,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateSquad)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSquad)
+					r.Post("/instructions/generate", h.GenerateSquadInstructions)
+					r.Post("/instructions/generation-jobs", h.CreateSquadInstructionsGenerationJob)
+					r.Get("/instructions/generation-jobs/{jobId}", h.GetSquadInstructionsGenerationJob)
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)

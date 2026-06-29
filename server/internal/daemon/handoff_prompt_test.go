@@ -36,3 +36,26 @@ func TestBuildPrompt_NoHandoffNote_Unchanged(t *testing.T) {
 		t.Fatalf("unexpected handoff framing when no note set:\n%s", out)
 	}
 }
+
+func TestBuildPrompt_SquadInstructionsGenerationBranch(t *testing.T) {
+	prompt := "## Runnable Agent Members\n\n### Backend\nInstructions:\nbackend doc"
+	out := BuildPrompt(Task{SquadInstructionsGenerationPrompt: prompt}, "claude")
+
+	for _, want := range []string{
+		"You are generating squad instructions",
+		prompt,
+		"Return only the final markdown for `squad.instructions`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("generation prompt missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{
+		"multica issue get",
+		"quick-create assistant",
+	} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("generation prompt should not use issue/quick-create branch; found %q\n---\n%s", banned, out)
+		}
+	}
+}

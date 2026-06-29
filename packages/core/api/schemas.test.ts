@@ -13,6 +13,7 @@ import {
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   SquadListSchema,
+  SquadInstructionsGenerationJobSchema,
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -318,6 +319,49 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_count).toBe(2);
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
+  });
+
+  it("parses squad instructions generation jobs", () => {
+    const parsed = SquadInstructionsGenerationJobSchema.parse({
+      id: "job-1",
+      job_id: "job-1",
+      task_id: "task-1",
+      status: "completed",
+      mode: "agent_docs",
+      instructions: "## Delegation Strategy\n",
+      error: null,
+      created_at: "2026-05-01T00:00:00Z",
+      updated_at: "2026-05-01T00:01:00Z",
+      completed_at: "2026-05-01T00:01:00Z",
+    });
+    expect(parsed).toMatchObject({
+      id: "job-1",
+      job_id: "job-1",
+      task_id: "task-1",
+      status: "completed",
+      instructions: "## Delegation Strategy\n",
+      error: null,
+    });
+  });
+
+  it("defaults optional squad instructions generation job fields", () => {
+    const parsed = SquadInstructionsGenerationJobSchema.parse({
+      id: "job-2",
+      status: "queued",
+    });
+    expect(parsed.task_id).toBeNull();
+    expect(parsed.mode).toBe("agent_docs");
+    expect(parsed.instructions).toBe("");
+    expect(parsed.error).toBeNull();
+    expect(parsed.completed_at).toBeNull();
+  });
+
+  it("degrades unknown squad instructions generation status to failed", () => {
+    const parsed = SquadInstructionsGenerationJobSchema.parse({
+      id: "job-3",
+      status: "mystery",
+    });
+    expect(parsed.status).toBe("failed");
   });
 });
 

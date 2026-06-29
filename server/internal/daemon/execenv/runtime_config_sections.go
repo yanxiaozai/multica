@@ -424,6 +424,11 @@ func writeAlwaysUseCLI(b *strings.Builder) {
 func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	b.WriteString("## Output\n\n")
 	switch kind {
+	case kindSquadInstructionsGeneration:
+		b.WriteString("This is a squad instructions generation task. Your final assistant output is captured automatically as the generated `squad.instructions` draft.\n\n")
+		b.WriteString("- Return only the final markdown instructions.\n")
+		b.WriteString("- Do NOT create issues, comments, files, commits, branches, or chat messages.\n")
+		b.WriteString("- Do NOT call `multica issue comment add` or any other write command.\n")
 	case kindAutopilotRunOnly:
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
 	case kindQuickCreate:

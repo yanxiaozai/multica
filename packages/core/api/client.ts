@@ -120,6 +120,10 @@ import type {
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
   Squad,
+  GenerateSquadInstructionsRequest,
+  GenerateSquadInstructionsResponse,
+  CreateSquadInstructionsGenerationRequest,
+  SquadInstructionsGenerationJob,
   SquadMember,
   SquadMemberStatusListResponse,
   BillingBalance,
@@ -165,6 +169,8 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_GENERATE_SQUAD_INSTRUCTIONS_RESPONSE,
+  EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_INTEGRATION,
   EMPTY_ISSUE_SYNC_CONFIG,
@@ -183,6 +189,8 @@ import {
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
   type AppConfigResponse,
+  GenerateSquadInstructionsResponseSchema,
+  SquadInstructionsGenerationJobSchema,
   GroupedIssuesResponseSchema,
   IssueIntegrationResponseSchema,
   IssueSyncConfigResponseSchema,
@@ -2212,6 +2220,27 @@ export class ApiClient {
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
     }) as Squad;
+  }
+
+  async generateSquadInstructions(id: string, data: GenerateSquadInstructionsRequest = { mode: "template" }): Promise<GenerateSquadInstructionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${id}/instructions/generate`, { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, GenerateSquadInstructionsResponseSchema, EMPTY_GENERATE_SQUAD_INSTRUCTIONS_RESPONSE, {
+      endpoint: "POST /api/squads/:id/instructions/generate",
+    }) as GenerateSquadInstructionsResponse;
+  }
+
+  async createSquadInstructionsGenerationJob(id: string, data: CreateSquadInstructionsGenerationRequest = { mode: "agent_docs" }): Promise<SquadInstructionsGenerationJob> {
+    const raw = await this.fetch<unknown>(`/api/squads/${id}/instructions/generation-jobs`, { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadInstructionsGenerationJobSchema, EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB, {
+      endpoint: "POST /api/squads/:id/instructions/generation-jobs",
+    }) as SquadInstructionsGenerationJob;
+  }
+
+  async getSquadInstructionsGenerationJob(squadId: string, jobId: string): Promise<SquadInstructionsGenerationJob> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/instructions/generation-jobs/${jobId}`);
+    return parseWithFallback(raw, SquadInstructionsGenerationJobSchema, EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB, {
+      endpoint: "GET /api/squads/:id/instructions/generation-jobs/:jobId",
+    }) as SquadInstructionsGenerationJob;
   }
 
   async deleteSquad(id: string): Promise<void> {

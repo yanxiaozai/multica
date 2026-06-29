@@ -757,6 +757,22 @@ type Squad struct {
 	Instructions string             `json:"instructions"`
 }
 
+type SquadInstructionsGenerationJob struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	SquadID      pgtype.UUID        `json:"squad_id"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	Status       string             `json:"status"`
+	Mode         string             `json:"mode"`
+	Draft        string             `json:"draft"`
+	Instructions string             `json:"instructions"`
+	Error        pgtype.Text        `json:"error"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+}
+
 type SquadMember struct {
 	ID         pgtype.UUID        `json:"id"`
 	SquadID    pgtype.UUID        `json:"squad_id"`

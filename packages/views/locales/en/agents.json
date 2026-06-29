@@ -396,6 +396,8 @@
       "source_chat": "Chat",
       "source_autopilot": "Autopilot",
       "source_untracked": "Untracked",
+      "source_squad_instructions_generation": "AI draft generation",
+      "source_squad_instructions_generation_short": "AI draft",
       "source_quick_create": "Quick create",
       "source_creating_issue": "Creating issue",
       "source_chat_session": "Chat session",

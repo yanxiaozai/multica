@@ -60,6 +60,36 @@ export interface UpdateSquadRequest {
   avatar_url?: string;
 }
 
+export interface GenerateSquadInstructionsRequest {
+  mode?: "template";
+}
+
+export interface GenerateSquadInstructionsResponse {
+  instructions: string;
+  mode: "template" | string;
+  warnings: string[];
+}
+
+export type SquadInstructionsGenerationStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface CreateSquadInstructionsGenerationRequest {
+  mode?: "agent_docs";
+  draft?: string;
+}
+
+export interface SquadInstructionsGenerationJob {
+  id: string;
+  job_id?: string;
+  task_id: string | null;
+  status: SquadInstructionsGenerationStatus;
+  mode: string;
+  instructions: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 export interface AddSquadMemberRequest {
   member_type: SquadMemberType;
   member_id: string;

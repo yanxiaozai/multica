@@ -378,6 +378,8 @@
       "source_chat": "チャット",
       "source_autopilot": "オートパイロット",
       "source_untracked": "未追跡",
+      "source_squad_instructions_generation": "AI下書き生成",
+      "source_squad_instructions_generation_short": "AI下書き",
       "source_quick_create": "クイック作成",
       "source_creating_issue": "イシューを作成中",
       "source_chat_session": "チャットセッション",

@@ -82,6 +82,19 @@
   "instructions_tab": {
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",
+    "generate_button": "Generate draft",
+    "ai_generate_button": "Summarize agent docs",
+    "ai_generating_button": "Summarizing...",
+    "ai_status_queued": "AI draft queued",
+    "ai_status_running": "AI draft running",
+    "ai_status_completed": "AI draft complete",
+    "ai_status_failed": "AI draft failed",
+    "replace_confirm": "Replace your unsaved instructions with a generated draft?",
+    "generated_toast": "Draft generated",
+    "ai_generated_toast": "AI draft is ready. Review and save it.",
+    "generate_failed_toast": "Failed to generate draft",
+    "ai_generate_failed_toast": "Failed to summarize agent docs",
+    "saved_toast": "Instructions saved",
     "save_button": "Save"
   },
   "scope": {

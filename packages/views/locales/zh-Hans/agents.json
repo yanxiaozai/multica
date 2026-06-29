@@ -386,6 +386,8 @@
       "source_chat": "聊天",
       "source_autopilot": "自动化",
       "source_untracked": "未追踪",
+      "source_squad_instructions_generation": "AI 草稿生成",
+      "source_squad_instructions_generation_short": "AI 草稿",
       "source_quick_create": "快速创建",
       "source_creating_issue": "正在创建 issue",
       "source_chat_session": "聊天会话",

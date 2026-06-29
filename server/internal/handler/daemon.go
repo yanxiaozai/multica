@@ -1671,11 +1671,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// resp came from above), so the daemon's prompt + issue_context.md render the
 	// assignment-handoff branch. Empty for all other task kinds.
 
+	// Internal squad-instructions generation task: no issue / chat /
+	// autopilot link — workspace and prompt come from the task's context
+	// JSONB. Resolve workspace from there so the isolation check below has
+	// something to compare.
+	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+		var gen service.SquadInstructionsGenerationContext
+		if json.Unmarshal(task.Context, &gen) == nil && gen.Type == service.SquadInstructionsGenerationContextType {
+			resp.SquadInstructionsGenerationPrompt = gen.Prompt
+			resp.ThreadName = "Generate squad instructions"
+			resp.WorkspaceID = gen.WorkspaceID
+		}
+	}
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
-	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+	if resp.SquadInstructionsGenerationPrompt == "" && task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
 		var qc service.QuickCreateContext
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true

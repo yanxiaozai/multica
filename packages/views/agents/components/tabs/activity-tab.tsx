@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Hash,
   MessageSquare,
+  Sparkles,
   Workflow,
   X,
 } from "lucide-react";
@@ -360,9 +361,14 @@ function TaskRow({
   const hasIssue = task.issue_id !== "";
   const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
   const isRunning = task.status === "running";
-  // Queued tasks have no messages yet — hiding the transcript button avoids
-  // a guaranteed "No execution data recorded." dialog open.
-  const showTranscript = task.status !== "queued";
+  // Tasks do not emit transcript messages until the daemon calls StartTask.
+  // `dispatched` is still pre-start preparation, so opening a transcript there
+  // is a guaranteed "No execution data recorded." dialog.
+  const showTranscript =
+    Boolean(task.started_at) ||
+    task.status === "completed" ||
+    task.status === "failed" ||
+    task.status === "cancelled";
   // Cancel only makes sense for the three active states. Terminal rows
   // (completed / failed / cancelled) hide the button entirely.
   const showCancel =
@@ -390,7 +396,9 @@ function TaskRow({
     task.status === "failed" ||
     task.status === "cancelled";
   const sourceFallback = !hasIssue
-    ? task.kind === "quick_create"
+    ? task.kind === "squad_instructions_generation"
+      ? t(($) => $.tab_body.activity.source_squad_instructions_generation)
+      : task.kind === "quick_create"
       ? isTerminalStatus
         ? t(($) => $.tab_body.activity.source_quick_create)
         : t(($) => $.tab_body.activity.source_creating_issue)
@@ -403,6 +411,8 @@ function TaskRow({
 
   const SourceIcon = hasIssue
     ? Hash
+    : task.kind === "squad_instructions_generation"
+      ? Sparkles
     : task.chat_session_id
       ? MessageSquare
       : task.autopilot_run_id
@@ -410,6 +420,8 @@ function TaskRow({
         : CircleHelp;
   const sourceLabel = hasIssue
     ? t(($) => $.tab_body.activity.source_issue)
+    : task.kind === "squad_instructions_generation"
+      ? t(($) => $.tab_body.activity.source_squad_instructions_generation_short)
     : task.chat_session_id
       ? t(($) => $.tab_body.activity.source_chat)
       : task.autopilot_run_id

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { ApiError, api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -17,7 +17,7 @@ import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save, Sparkles } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -60,7 +60,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadInstructionsGenerationJob, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -121,6 +121,7 @@ export function SquadDetailPage() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [instructionsGenerationJobId, setInstructionsGenerationJobId] = useState<string | null>(null);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -130,6 +131,32 @@ export function SquadDetailPage() {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     },
   });
+
+  const generateInstructionsMut = useMutation({
+    mutationFn: () => api.generateSquadInstructions(squadId, { mode: "template" }),
+  });
+
+  const generateInstructionsFromAgentDocsMut = useMutation({
+    mutationFn: (draft: string) => api.createSquadInstructionsGenerationJob(squadId, { mode: "agent_docs", draft }),
+    onSuccess: (job) => {
+      setInstructionsGenerationJobId(job.id);
+    },
+    onError: (error) => {
+      const detail = error instanceof ApiError ? ` (${error.status}: ${error.message})` : "";
+      toast.error(`${t(($) => $.instructions_tab.ai_generate_failed_toast)}${detail}`);
+    },
+  });
+
+  const instructionsGenerationJobQuery = useQuery({
+    queryKey: [...workspaceKeys.squads(wsId), squadId, "instructions-generation", instructionsGenerationJobId],
+    queryFn: () => api.getSquadInstructionsGenerationJob(squadId, instructionsGenerationJobId!),
+    enabled: Boolean(workspace?.id && squadId && instructionsGenerationJobId),
+    refetchInterval: instructionsGenerationJobId ? 2000 : false,
+  });
+
+  const clearInstructionsGenerationJob = useCallback(() => {
+    setInstructionsGenerationJobId(null);
+  }, []);
 
   const addMemberMut = useMutation({
     mutationFn: (input: { type: "agent" | "member"; id: string; role?: string }) =>
@@ -267,7 +294,24 @@ export function SquadDetailPage() {
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
-          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success("Instructions saved"); }}
+          onGenerateInstructions={async () => {
+            const generated = await generateInstructionsMut.mutateAsync();
+            if (generated.warnings.length > 0) {
+              toast.warning(generated.warnings[0]);
+            }
+            return generated.instructions;
+          }}
+          onGenerateInstructionsFromAgentDocs={async (draft) => {
+            await generateInstructionsFromAgentDocsMut.mutateAsync(draft);
+          }}
+          generatingInstructionsFromAgentDocs={
+            generateInstructionsFromAgentDocsMut.isPending ||
+            instructionsGenerationJobQuery.data?.status === "queued" ||
+            instructionsGenerationJobQuery.data?.status === "running"
+          }
+          instructionsGenerationJob={instructionsGenerationJobQuery.data}
+          onInstructionsGenerationHandled={clearInstructionsGenerationJob}
+          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success(t(($) => $.instructions_tab.saved_toast)); }}
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>
@@ -1011,6 +1055,11 @@ function SquadOverviewPane({
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
+  onGenerateInstructions,
+  onGenerateInstructionsFromAgentDocs,
+  generatingInstructionsFromAgentDocs,
+  instructionsGenerationJob,
+  onInstructionsGenerationHandled,
   onSaveInstructions,
   setLeaderPending,
 }: {
@@ -1028,6 +1077,11 @@ function SquadOverviewPane({
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
+  onGenerateInstructions: () => Promise<string>;
+  onGenerateInstructionsFromAgentDocs: (draft: string) => Promise<void>;
+  generatingInstructionsFromAgentDocs: boolean;
+  instructionsGenerationJob?: SquadInstructionsGenerationJob;
+  onInstructionsGenerationHandled: () => void;
   onSaveInstructions: (next: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
@@ -1092,6 +1146,11 @@ function SquadOverviewPane({
           <div className="flex h-full flex-col p-4 md:p-6">
             <SquadInstructionsTab
               squad={squad}
+              onGenerate={onGenerateInstructions}
+              onGenerateFromAgentDocs={onGenerateInstructionsFromAgentDocs}
+              generatingFromAgentDocs={generatingInstructionsFromAgentDocs}
+              generationJob={instructionsGenerationJob}
+              onGenerationHandled={onInstructionsGenerationHandled}
               onSave={onSaveInstructions}
               onDirtyChange={setActiveDirty}
             />
@@ -1345,25 +1404,90 @@ function SquadMembersTab({
 // (server/internal/handler/daemon.go).
 function SquadInstructionsTab({
   squad,
+  onGenerate,
+  onGenerateFromAgentDocs,
+  generatingFromAgentDocs,
+  generationJob,
+  onGenerationHandled,
   onSave,
   onDirtyChange,
 }: {
   squad: Squad;
+  onGenerate: () => Promise<string>;
+  onGenerateFromAgentDocs: (draft: string) => Promise<void>;
+  generatingFromAgentDocs: boolean;
+  generationJob?: SquadInstructionsGenerationJob;
+  onGenerationHandled: () => void;
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("squads");
   const [value, setValue] = useState(squad.instructions ?? "");
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [editorVersion, setEditorVersion] = useState(0);
   const isDirty = value !== (squad.instructions ?? "");
+  const valueRef = useRef(value);
+  const persistedInstructionsRef = useRef(squad.instructions ?? "");
+  const handledGenerationJobRef = useRef<string | null>(null);
+
+  const generationStatusText = generationJob?.status === "queued"
+    ? t(($) => $.instructions_tab.ai_status_queued)
+    : generationJob?.status === "running"
+      ? t(($) => $.instructions_tab.ai_status_running)
+      : generationJob?.status === "completed"
+        ? t(($) => $.instructions_tab.ai_status_completed)
+        : generationJob?.status === "failed"
+          ? t(($) => $.instructions_tab.ai_status_failed)
+          : null;
 
   useEffect(() => {
     setValue(squad.instructions ?? "");
+    setEditorVersion((v) => v + 1);
+    persistedInstructionsRef.current = squad.instructions ?? "";
   }, [squad.id, squad.instructions]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    if (!generationJob) return;
+    const handledKey = `${generationJob.id}:${generationJob.status}:${generationJob.updated_at}`;
+    if (handledGenerationJobRef.current === handledKey) return;
+
+    if (generationJob.status === "completed") {
+      handledGenerationJobRef.current = handledKey;
+      const next = generationJob.instructions.trim();
+      if (!next) {
+        toast.error(t(($) => $.instructions_tab.ai_generate_failed_toast));
+        onGenerationHandled();
+        return;
+      }
+      const current = valueRef.current;
+      const persisted = persistedInstructionsRef.current;
+      if (current !== persisted && !window.confirm(t(($) => $.instructions_tab.replace_confirm))) {
+        onGenerationHandled();
+        return;
+      }
+      setValue(next);
+      setEditorVersion((v) => v + 1);
+      toast.success(t(($) => $.instructions_tab.ai_generated_toast));
+      onGenerationHandled();
+      return;
+    }
+
+    if (generationJob.status === "failed" || generationJob.status === "cancelled") {
+      handledGenerationJobRef.current = handledKey;
+      const detail = generationJob.error ? ` (${generationJob.error})` : "";
+      toast.error(`${t(($) => $.instructions_tab.ai_generate_failed_toast)}${detail}`);
+      onGenerationHandled();
+    }
+  }, [generationJob, onGenerationHandled, t]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -1376,6 +1500,32 @@ function SquadInstructionsTab({
     }
   };
 
+  const handleGenerate = async () => {
+    if (isDirty && !window.confirm(t(($) => $.instructions_tab.replace_confirm))) {
+      return;
+    }
+    setGenerating(true);
+    try {
+      const next = await onGenerate();
+      setValue(next);
+      setEditorVersion((v) => v + 1);
+      toast.success(t(($) => $.instructions_tab.generated_toast));
+    } catch (error) {
+      const detail = error instanceof ApiError ? ` (${error.status}: ${error.message})` : "";
+      toast.error(`${t(($) => $.instructions_tab.generate_failed_toast)}${detail}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateFromAgentDocs = async () => {
+    try {
+      await onGenerateFromAgentDocs(value);
+    } catch {
+      // toast handled by parent mutation
+    }
+  };
+
   return (
     <div className="flex h-full flex-col gap-4">
       <p className="text-xs text-muted-foreground">
@@ -1384,7 +1534,7 @@ function SquadInstructionsTab({
 
       <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
         <ContentEditor
-          key={squad.id}
+          key={`${squad.id}:${editorVersion}`}
           defaultValue={value}
           onUpdate={setValue}
           placeholder="e.g. Always start by writing a failing test. Prefer small, atomic commits."
@@ -1394,10 +1544,29 @@ function SquadInstructionsTab({
         />
       </div>
 
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {isDirty && (
           <span className="text-xs text-muted-foreground">{t(($) => $.instructions_tab.unsaved_changes)}</span>
         )}
+        {generationStatusText && (
+          <span className="text-xs text-muted-foreground">{generationStatusText}</span>
+        )}
+        <Button size="sm" variant="outline" onClick={() => void handleGenerateFromAgentDocs()} disabled={generatingFromAgentDocs || saving}>
+          {generatingFromAgentDocs ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+          {generatingFromAgentDocs ? t(($) => $.instructions_tab.ai_generating_button) : t(($) => $.instructions_tab.ai_generate_button)}
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleGenerate} disabled={generating || saving}>
+          {generating ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+          {t(($) => $.instructions_tab.generate_button)}
+        </Button>
         <Button size="sm" onClick={handleSave} disabled={!isDirty || saving}>
           {saving ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -24,7 +24,7 @@ func withSlimBrief(t *testing.T) {
 	t.Cleanup(func() { runtimeFlags.Store(saved) })
 }
 
-// TestClassifyTask pins the precedence rule on classifyTask. All five
+// TestClassifyTask pins the precedence rule on classifyTask. All six
 // kinds plus tiebreak cases for safety.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
@@ -33,12 +33,14 @@ func TestClassifyTask(t *testing.T) {
 		ctx  TaskContextForEnv
 		want taskKind
 	}{
+		{"squad-instructions-generation", TaskContextForEnv{SquadInstructionsGenerationPrompt: "generate"}, kindSquadInstructionsGeneration},
 		{"chat", TaskContextForEnv{ChatSessionID: "c"}, kindChat},
 		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "p"}, kindQuickCreate},
 		{"autopilot", TaskContextForEnv{AutopilotRunID: "r"}, kindAutopilotRunOnly},
 		{"comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindCommentTriggered},
 		{"assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindAssignmentTriggered},
 		{"assignment-bare", TaskContextForEnv{}, kindAssignmentTriggered},
+		{"tiebreak-generation-vs-chat", TaskContextForEnv{SquadInstructionsGenerationPrompt: "generate", ChatSessionID: "c"}, kindSquadInstructionsGeneration},
 		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
 		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
 		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
@@ -62,6 +64,7 @@ func TestTaskKindHasIssueContext(t *testing.T) {
 		kind taskKind
 		want bool
 	}{
+		{kindSquadInstructionsGeneration, false},
 		{kindCommentTriggered, true},
 		{kindAssignmentTriggered, true},
 		{kindAutopilotRunOnly, false},
@@ -141,7 +144,8 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		mustHave map[taskKind]bool
 	}
 	allKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
+		kindSquadInstructionsGeneration: true,
+		kindCommentTriggered:            true, kindAssignmentTriggered: true,
 		kindAutopilotRunOnly: true, kindQuickCreate: true, kindChat: true,
 	}
 	issueKinds := map[taskKind]bool{
@@ -172,6 +176,8 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 	}
 
 	fixtures := map[taskKind]TaskContextForEnv{
+		kindSquadInstructionsGeneration: {SquadInstructionsGenerationPrompt: "Summarize agent docs.", AgentName: "Eve", AgentID: "eve-1",
+			Repos: baseRepo, AgentSkills: baseSkill},
 		kindChat: {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
 		kindQuickCreate: {QuickCreatePrompt: "p", AgentName: "Eve", AgentID: "eve-1",
@@ -198,6 +204,45 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
 		}
+	}
+}
+
+func TestSquadInstructionsGenerationOutputDoesNotRequireIssueComment(t *testing.T) {
+	cases := []struct {
+		name string
+		slim bool
+	}{
+		{name: "legacy"},
+		{name: "slim", slim: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.slim {
+				withSlimBrief(t)
+			}
+			out := buildMetaSkillContent("claude", TaskContextForEnv{
+				SquadInstructionsGenerationPrompt: "Summarize agent docs.",
+				AgentName:                         "Leader",
+				AgentID:                           "leader-1",
+			})
+			for _, want := range []string{
+				"This is a squad instructions generation task",
+				"Return only the final markdown instructions",
+				"Do NOT create issues, comments, files, commits, branches, or chat messages",
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s brief missing %q\n---\n%s", tc.name, want, out)
+				}
+			}
+			for _, banned := range []string{
+				"Final results MUST be delivered via `multica issue comment add`",
+				"Post exactly ONE comment per run",
+			} {
+				if strings.Contains(out, banned) {
+					t.Fatalf("%s brief should not require issue comments; found %q\n---\n%s", tc.name, banned, out)
+				}
+			}
+		})
 	}
 }
 

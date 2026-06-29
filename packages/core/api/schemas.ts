@@ -15,6 +15,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  GenerateSquadInstructionsResponse,
+  SquadInstructionsGenerationJob,
   IssueIntegration,
   IssueSyncConfig,
   ListIssuesResponse,
@@ -808,6 +810,43 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
+};
+
+export const GenerateSquadInstructionsResponseSchema = z.object({
+  instructions: z.string().default(""),
+  mode: z.string().default("template"),
+  warnings: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_GENERATE_SQUAD_INSTRUCTIONS_RESPONSE: GenerateSquadInstructionsResponse = {
+  instructions: "",
+  mode: "template",
+  warnings: [],
+};
+
+export const SquadInstructionsGenerationJobSchema = z.object({
+  id: z.string().default(""),
+  job_id: z.string().optional(),
+  task_id: z.string().nullable().optional().transform((v) => v ?? null),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).catch("failed"),
+  mode: z.string().default("agent_docs"),
+  instructions: z.string().default(""),
+  error: z.string().nullable().optional().transform((v) => v ?? null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  completed_at: z.string().nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB: SquadInstructionsGenerationJob = {
+  id: "",
+  task_id: null,
+  status: "failed",
+  mode: "agent_docs",
+  instructions: "",
+  error: null,
+  created_at: "",
+  updated_at: "",
+  completed_at: null,
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status

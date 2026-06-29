@@ -82,6 +82,19 @@
   "instructions_tab": {
     "description": "小队指引会在 Leader 智能体处理分配给该小队的 issue 时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次任务都应遵循的上下文。",
     "unsaved_changes": "有未保存的修改",
+    "generate_button": "生成草稿",
+    "ai_generate_button": "总结 agent 文档",
+    "ai_generating_button": "正在总结...",
+    "ai_status_queued": "AI 草稿已排队",
+    "ai_status_running": "AI 草稿生成中",
+    "ai_status_completed": "AI 草稿已完成",
+    "ai_status_failed": "AI 草稿失败",
+    "replace_confirm": "要用生成的草稿替换当前未保存的指引吗？",
+    "generated_toast": "草稿已生成",
+    "ai_generated_toast": "AI 草稿已生成，请检查后保存",
+    "generate_failed_toast": "生成草稿失败",
+    "ai_generate_failed_toast": "总结 agent 文档失败",
+    "saved_toast": "指引已保存",
     "save_button": "保存"
   },
   "scope": {

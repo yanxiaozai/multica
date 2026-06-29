@@ -396,6 +396,8 @@
       "source_chat": "채팅",
       "source_autopilot": "오토파일럿",
       "source_untracked": "추적 안 됨",
+      "source_squad_instructions_generation": "AI 초안 생성",
+      "source_squad_instructions_generation_short": "AI 초안",
       "source_quick_create": "빠른 생성",
       "source_creating_issue": "이슈 생성 중",
       "source_chat_session": "채팅 세션",

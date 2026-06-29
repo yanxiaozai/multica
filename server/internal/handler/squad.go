@@ -291,6 +291,40 @@ func (h *Handler) GetSquad(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) GenerateSquadInstructions(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Mode == "" {
+		req.Mode = "template"
+	}
+	if req.Mode != "template" {
+		writeError(w, http.StatusBadRequest, "mode must be template")
+		return
+	}
+
+	resp, err := h.generateSquadInstructions(r.Context(), squad)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate squad instructions")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
 	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
