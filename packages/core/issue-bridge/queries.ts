@@ -28,6 +28,8 @@ export function issueSyncConfigsOptions(wsId: string) {
     queryKey: issueBridgeKeys.syncConfigs(wsId),
     queryFn: () => api.listIssueSyncConfigs({ workspace_id: wsId }),
     enabled: !!wsId,
+    staleTime: 0,
+    refetchInterval: 60 * 1000,
   });
 }
 

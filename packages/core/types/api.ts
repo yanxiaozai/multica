@@ -204,6 +204,7 @@ export interface SearchProjectsResponse {
 export type IssueIntegrationProvider = "gitlab";
 export type IssueSyncScopeType = "project" | "repo_resource";
 export type IssueSyncAssigneeType = "agent" | "squad";
+export type IssueSyncMode = "assigned_to_me" | "auto_accept";
 
 export interface IssueIntegration {
   id: string;
@@ -269,6 +270,8 @@ export interface IssueSyncConfig {
   sync_enabled: boolean;
   poll_interval_seconds: number | null;
   state_mapping: Record<string, unknown>;
+  sync_mode: IssueSyncMode;
+  auto_accept_label: string;
   auto_assign_enabled: boolean;
   default_assignee_type: string | null;
   default_assignee_id: string | null;
@@ -292,6 +295,8 @@ export interface UpsertIssueSyncConfigRequest {
   sync_enabled?: boolean;
   poll_interval_seconds?: number | null;
   state_mapping?: Record<string, unknown>;
+  sync_mode?: IssueSyncMode;
+  auto_accept_label?: string;
   auto_assign_enabled?: boolean;
   default_assignee_type?: IssueSyncAssigneeType | null;
   default_assignee_id?: string | null;

@@ -30,6 +30,7 @@ import type {
   IssueIntegration,
   IssueSyncAssigneeType,
   IssueSyncConfig,
+  IssueSyncMode,
   IssueSyncScopeType,
   Project,
   ProjectResource,
@@ -56,6 +57,7 @@ import { useT } from "../../i18n";
 
 type ScopeType = IssueSyncScopeType;
 type AssigneeType = IssueSyncAssigneeType;
+type SyncMode = IssueSyncMode;
 
 type IntegrationDraft = {
   name: string;
@@ -74,6 +76,8 @@ type SyncRuleDraft = {
   sync_enabled: boolean;
   poll_interval_seconds: string;
   state_mapping: Record<string, unknown>;
+  sync_mode: SyncMode;
+  auto_accept_label: string;
   auto_assign_enabled: boolean;
   default_assignee_type: AssigneeType;
   default_assignee_id: string;
@@ -114,6 +118,8 @@ function defaultSyncRuleDraft(integrationId: string): SyncRuleDraft {
     sync_enabled: false,
     poll_interval_seconds: "",
     state_mapping: { opened: "backlog", closed: "done" },
+    sync_mode: "assigned_to_me",
+    auto_accept_label: "ai-auto",
     auto_assign_enabled: false,
     default_assignee_type: "agent",
     default_assignee_id: "",
@@ -132,6 +138,8 @@ function draftFromSyncRule(rule: IssueSyncConfig): SyncRuleDraft {
       ? String(rule.poll_interval_seconds)
       : "",
     state_mapping: rule.state_mapping,
+    sync_mode: rule.sync_mode ?? "assigned_to_me",
+    auto_accept_label: rule.auto_accept_label || "ai-auto",
     auto_assign_enabled: rule.auto_assign_enabled,
     default_assignee_type:
       rule.default_assignee_type === "squad" ? "squad" : "agent",
@@ -366,6 +374,14 @@ export function GitLabIssuesTab() {
     if (draft.auto_assign_enabled && !draft.default_assignee_id) {
       return t(($) => $.issue_bridge.validation_assignee);
     }
+    if (draft.sync_mode === "auto_accept") {
+      if (!draft.auto_accept_label.trim()) {
+        return t(($) => $.issue_bridge.validation_auto_accept_label);
+      }
+      if (!draft.auto_assign_enabled || !draft.default_assignee_id) {
+        return t(($) => $.issue_bridge.validation_auto_accept_assignee);
+      }
+    }
     return null;
   }
 
@@ -434,6 +450,8 @@ export function GitLabIssuesTab() {
         ? Number(ruleDraft.poll_interval_seconds)
         : null,
       state_mapping: ruleDraft.state_mapping,
+      sync_mode: ruleDraft.sync_mode,
+      auto_accept_label: ruleDraft.auto_accept_label.trim() || "ai-auto",
       auto_assign_enabled: ruleDraft.auto_assign_enabled,
       default_assignee_type: ruleDraft.auto_assign_enabled
         ? ruleDraft.default_assignee_type
@@ -1121,6 +1139,55 @@ function SyncRuleForm({
         </div>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="issue-bridge-rule-sync-mode" className="text-xs">
+            {t(($) => $.issue_bridge.sync_mode_label)}
+          </Label>
+          <select
+            id="issue-bridge-rule-sync-mode"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={draft.sync_mode}
+            onChange={(e) => {
+              const mode = e.target.value as SyncMode;
+              onChange({
+                ...draft,
+                sync_mode: mode,
+                auto_assign_enabled:
+                  mode === "auto_accept" ? true : draft.auto_assign_enabled,
+              });
+            }}
+          >
+            <option value="assigned_to_me">
+              {t(($) => $.issue_bridge.sync_mode_assigned_to_me)}
+            </option>
+            <option value="auto_accept">
+              {t(($) => $.issue_bridge.sync_mode_auto_accept)}
+            </option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {draft.sync_mode === "auto_accept"
+              ? t(($) => $.issue_bridge.sync_mode_auto_accept_hint)
+              : t(($) => $.issue_bridge.sync_mode_assigned_to_me_hint)}
+          </p>
+        </div>
+
+        {draft.sync_mode === "auto_accept" && (
+          <div className="space-y-2">
+            <Label htmlFor="issue-bridge-rule-auto-accept-label" className="text-xs">
+              {t(($) => $.issue_bridge.auto_accept_label)}
+            </Label>
+            <Input
+              id="issue-bridge-rule-auto-accept-label"
+              value={draft.auto_accept_label}
+              onChange={(e) =>
+                onChange({ ...draft, auto_accept_label: e.target.value })
+              }
+            />
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2">
         <div className="flex flex-col gap-3 rounded-md border bg-background p-3">
           <Label htmlFor="issue-bridge-rule-sync" className="text-sm font-medium">
@@ -1148,6 +1215,7 @@ function SyncRuleForm({
             <Switch
               id="issue-bridge-rule-auto-assign"
               checked={draft.auto_assign_enabled}
+              disabled={draft.sync_mode === "auto_accept"}
               onCheckedChange={(checked) =>
                 onChange({
                   ...draft,

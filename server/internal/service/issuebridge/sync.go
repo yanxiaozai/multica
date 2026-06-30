@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -139,18 +140,11 @@ func (s *Service) ImportProjectIssues(
 			params.AssigneeID = cfg.DefaultAssigneeID
 		}
 
-		// TODO(issubreidge-ws): pass a BroadcastPayload so the issue:created WS
-		// event carries the full issue, not the minimal {issue_id} fallback.
-		// With nil BroadcastPayload, IssueService.Create emits {issue_id} only,
-		// and the renderer's WS dispatcher (use-realtime-sync.ts issue:created)
-		// bails on `if (!issue) return` — so OTHER clients / tabs never receive
-		// a live update for imported or polled issues (they see them only after
-		// a manual refresh). The importing user's own view is covered because
-		// useImportProjectGitLabIssues invalidates the issue caches on settle,
-		// but that's per-client and doesn't help teammates or the scheduler's
-		// background polls. Proper fix: extract the handler-layer issue→response
-		// mapping into a shared helper (or a service-level builder) and supply
-		// it here as BroadcastPayload. Tracked as a known gap, not yet done.
+		// TODO(issubreidge-ws): pass a BroadcastPayload so issue:created can
+		// patch caches with the full issue. With nil BroadcastPayload,
+		// IssueService.Create emits {issue_id} only; renderers now fall back to
+		// invalidating issue/project queries, but a full payload would avoid a
+		// refetch and keep the behavior aligned with handler-created issues.
 		created, createErr := s.IssueService.Create(ctx, params, service.IssueCreateOpts{})
 		if createErr != nil {
 			// A single bad issue must not abort the whole batch.
@@ -182,9 +176,234 @@ func (s *Service) ImportProjectIssues(
 	return result, nil
 }
 
+func (s *Service) autoAcceptProjectIssues(ctx context.Context, cfg db.IssueSyncConfig) (ImportResult, error) {
+	if s == nil || s.Queries == nil {
+		return ImportResult{}, fmt.Errorf("issue bridge service requires queries")
+	}
+	if s.IssueService == nil {
+		return ImportResult{}, ErrIssueServiceMissing
+	}
+	if cfg.ScopeType != "project" || !cfg.ScopeID.Valid {
+		return ImportResult{}, nil
+	}
+	if !cfg.AutoAssignEnabled || !cfg.DefaultAssigneeType.Valid || !cfg.DefaultAssigneeID.Valid {
+		return ImportResult{}, fmt.Errorf("auto-accept requires auto assignment to an agent or squad")
+	}
+
+	integration, err := s.Queries.GetIssueIntegrationInWorkspace(ctx, db.GetIssueIntegrationInWorkspaceParams{
+		ID:          cfg.IntegrationID,
+		WorkspaceID: cfg.WorkspaceID,
+	})
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("load integration: %w", err)
+	}
+	token, err := s.decryptToken(integration.EncryptedToken)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	factory := s.ClientFactory
+	if factory == nil {
+		factory = defaultClientFactory
+	}
+	client, err := factory(integration.BaseUrl, token)
+	if err != nil {
+		return ImportResult{}, err
+	}
+
+	label := strings.TrimSpace(cfg.AutoAcceptLabel)
+	if label == "" {
+		label = DefaultAutoAcceptLabel
+	}
+	user, err := client.TestConnection(ctx)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("load gitlab token user: %w", err)
+	}
+	remoteIssues, err := client.ListProjectIssues(ctx, cfg.RemoteProjectRef, ListIssuesOpts{
+		State:      "opened",
+		Labels:     []string{label},
+		Unassigned: true,
+	})
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("fetch gitlab auto-accept candidates: %w", err)
+	}
+	claimedIssues, err := client.ListProjectIssues(ctx, cfg.RemoteProjectRef, ListIssuesOpts{
+		AssignedToMe: true,
+		State:        "opened",
+		Labels:       []string{label},
+	})
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("fetch gitlab claimed auto-accept candidates: %w", err)
+	}
+	remoteIssues = mergeGitLabIssuesByIID(remoteIssues, claimedIssues)
+
+	stateMap := decodeStateMapping(cfg.StateMapping)
+	result := ImportResult{}
+	for _, candidate := range remoteIssues {
+		if existing, lookupErr := s.Queries.GetIssueBridgeItemByRemote(ctx, db.GetIssueBridgeItemByRemoteParams{
+			IntegrationID: cfg.IntegrationID,
+			RemoteIid:     candidate.IID,
+		}); lookupErr == nil && existing.IssueID.Valid {
+			result.Skipped++
+			continue
+		} else if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+			result.failed(fmt.Sprintf("iid %d: dedup lookup: %v", candidate.IID, lookupErr))
+			continue
+		}
+
+		fresh, err := client.GetProjectIssue(ctx, cfg.RemoteProjectRef, candidate.IID)
+		if err != nil {
+			result.failed(fmt.Sprintf("iid %d: reload before accept: %v", candidate.IID, err))
+			continue
+		}
+		if !isAutoAcceptCandidateForUser(fresh, label, user.ID) {
+			result.Skipped++
+			continue
+		}
+		claimed := fresh
+		if len(fresh.Assignees) == 0 {
+			claimed, err = client.AssignIssueToUser(ctx, cfg.RemoteProjectRef, fresh.IID, user.ID)
+			if err != nil {
+				result.failed(fmt.Sprintf("iid %d: claim gitlab issue: %v", fresh.IID, err))
+				continue
+			}
+			if !gitLabIssueAssignedTo(claimed, user.ID) {
+				result.failed(fmt.Sprintf("iid %d: claim verification failed", fresh.IID))
+				continue
+			}
+		}
+
+		creatorType, creatorID, err := s.autoAcceptCreator(ctx, cfg)
+		if err != nil {
+			result.failed(fmt.Sprintf("iid %d: resolve local creator: %v", claimed.IID, err))
+			continue
+		}
+		created, createErr := s.IssueService.Create(ctx, service.IssueCreateParams{
+			WorkspaceID:    cfg.WorkspaceID,
+			Title:          claimed.Title,
+			Description:    pgtype.Text{String: claimed.Description, Valid: claimed.Description != ""},
+			Status:         mapAutoAcceptState(stateMap, claimed.State),
+			Priority:       "none",
+			ProjectID:      cfg.ScopeID,
+			CreatorType:    creatorType,
+			CreatorID:      creatorID,
+			AllowDuplicate: true,
+			AssigneeType:   cfg.DefaultAssigneeType,
+			AssigneeID:     cfg.DefaultAssigneeID,
+		}, service.IssueCreateOpts{})
+		if createErr != nil {
+			result.failed(fmt.Sprintf("iid %d (%q): create local issue: %v", claimed.IID, claimed.Title, createErr))
+			continue
+		}
+		if created.Issue.ID.Valid {
+			if _, insErr := s.Queries.CreateIssueBridgeItem(ctx, db.CreateIssueBridgeItemParams{
+				WorkspaceID:      cfg.WorkspaceID,
+				IssueID:          created.Issue.ID,
+				IntegrationID:    cfg.IntegrationID,
+				RemoteProjectRef: cfg.RemoteProjectRef,
+				RemoteIid:        claimed.IID,
+				RemoteUrl:        claimed.WebURL,
+				RemoteUpdatedAt:  pgTimestamp(claimed.UpdatedAt),
+			}); insErr != nil {
+				slog.Error("issue bridge: auto-accepted issue but failed to record mapping",
+					"issue_id", created.Issue.ID, "remote_iid", claimed.IID, "error", insErr)
+				result.failed(fmt.Sprintf("iid %d: record mapping: %v", claimed.IID, insErr))
+				continue
+			}
+		}
+		if err := client.CreateIssueNote(ctx, cfg.RemoteProjectRef, claimed.IID, autoAcceptComment(created.Issue.ID, cfg)); err != nil {
+			result.failed(fmt.Sprintf("iid %d: comment after accept: %v", claimed.IID, err))
+		}
+		result.Imported++
+	}
+	return result, nil
+}
+
+func (s *Service) autoAcceptCreator(ctx context.Context, cfg db.IssueSyncConfig) (string, pgtype.UUID, error) {
+	if !cfg.DefaultAssigneeType.Valid || !cfg.DefaultAssigneeID.Valid {
+		return "", pgtype.UUID{}, fmt.Errorf("missing default assignee")
+	}
+	switch strings.TrimSpace(cfg.DefaultAssigneeType.String) {
+	case "agent":
+		if _, err := s.Queries.GetAgent(ctx, cfg.DefaultAssigneeID); err != nil {
+			return "", pgtype.UUID{}, fmt.Errorf("agent assignee not found: %w", err)
+		}
+		return "agent", cfg.DefaultAssigneeID, nil
+	case "squad":
+		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          cfg.DefaultAssigneeID,
+			WorkspaceID: cfg.WorkspaceID,
+		})
+		if err != nil {
+			return "", pgtype.UUID{}, fmt.Errorf("squad assignee not found: %w", err)
+		}
+		return "agent", squad.LeaderID, nil
+	default:
+		return "", pgtype.UUID{}, fmt.Errorf("default_assignee_type must be agent or squad")
+	}
+}
+
 func (r *ImportResult) failed(msg string) {
 	r.Failed++
 	r.Errors = append(r.Errors, msg)
+}
+
+func isAutoAcceptCandidate(issue GitLabIssue, label string) bool {
+	return strings.EqualFold(issue.State, "opened") &&
+		len(issue.Assignees) == 0 &&
+		gitLabIssueHasLabel(issue, label)
+}
+
+func isAutoAcceptCandidateForUser(issue GitLabIssue, label string, userID int64) bool {
+	return isAutoAcceptCandidate(issue, label) ||
+		(strings.EqualFold(issue.State, "opened") &&
+			gitLabIssueHasLabel(issue, label) &&
+			gitLabIssueAssignedTo(issue, userID))
+}
+
+func mergeGitLabIssuesByIID(groups ...[]GitLabIssue) []GitLabIssue {
+	seen := map[int64]bool{}
+	merged := make([]GitLabIssue, 0)
+	for _, group := range groups {
+		for _, issue := range group {
+			if seen[issue.IID] {
+				continue
+			}
+			seen[issue.IID] = true
+			merged = append(merged, issue)
+		}
+	}
+	return merged
+}
+
+func gitLabIssueHasLabel(issue GitLabIssue, label string) bool {
+	label = strings.TrimSpace(label)
+	for _, got := range issue.Labels {
+		if strings.EqualFold(strings.TrimSpace(got), label) {
+			return true
+		}
+	}
+	return false
+}
+
+func gitLabIssueAssignedTo(issue GitLabIssue, userID int64) bool {
+	for _, assignee := range issue.Assignees {
+		if assignee.ID == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func autoAcceptComment(localIssueID pgtype.UUID, cfg db.IssueSyncConfig) string {
+	target := "configured assignee"
+	if cfg.DefaultAssigneeType.Valid {
+		target = cfg.DefaultAssigneeType.String
+	}
+	local := ""
+	if localIssueID.Valid {
+		local = fmt.Sprintf("\n\nLocal issue: `%s`", localIssueID.String())
+	}
+	return fmt.Sprintf("Multica has auto-accepted this issue and assigned it to the configured %s.%s", target, local)
 }
 
 // mapRemoteState translates a GitLab issue state ("opened"/"closed") to a
@@ -195,6 +414,14 @@ func mapRemoteState(mapping map[string]string, state string) string {
 		return mapped
 	}
 	return "backlog"
+}
+
+func mapAutoAcceptState(mapping map[string]string, state string) string {
+	mapped := mapRemoteState(mapping, state)
+	if strings.EqualFold(state, "opened") && mapped == "backlog" {
+		return "todo"
+	}
+	return mapped
 }
 
 // decodeStateMapping parses the sync config's state_mapping JSONB. Returns an
@@ -221,10 +448,10 @@ func pgTimestamp(t time.Time) pgtype.Timestamptz {
 
 // PollStats summarises one scheduler tick over every due config.
 type PollStats struct {
-	Configs   int // due configs processed
-	Imported  int // total issues created across all configs
-	Skipped   int // already-mapped issues skipped
-	Failed    int // per-issue failures across all configs
+	Configs    int // due configs processed
+	Imported   int // total issues created across all configs
+	Skipped    int // already-mapped issues skipped
+	Failed     int // per-issue failures across all configs
 	ErrConfigs int // configs whose whole poll errored (marked failure)
 }
 
@@ -262,11 +489,18 @@ func (s *Service) SyncDueConfigs(ctx context.Context) (PollStats, error) {
 			updatedAfter = cfg.LastSuccessfulPollAt.Time
 		}
 
-		result, importErr := s.ImportProjectIssues(ctx, cfg.WorkspaceID, cfg.ScopeID, systemActorID(), ImportOpts{
-			AssignedToMe: true,
-			State:        "all",
-			UpdatedAfter: updatedAfter,
-		})
+		var result ImportResult
+		var importErr error
+		switch strings.TrimSpace(cfg.SyncMode) {
+		case SyncModeAutoAccept:
+			result, importErr = s.autoAcceptProjectIssues(ctx, cfg)
+		default:
+			result, importErr = s.ImportProjectIssues(ctx, cfg.WorkspaceID, cfg.ScopeID, systemActorID(), ImportOpts{
+				AssignedToMe: true,
+				State:        "all",
+				UpdatedAfter: updatedAfter,
+			})
+		}
 		if importErr != nil {
 			// Whole-config failure (e.g. token revoked, network). Record it
 			// and move on — the next tick retries after the interval.

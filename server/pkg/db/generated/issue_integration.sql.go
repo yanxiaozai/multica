@@ -112,14 +112,14 @@ func (q *Queries) CreateIssueIntegration(ctx context.Context, arg CreateIssueInt
 const createIssueSyncConfig = `-- name: CreateIssueSyncConfig :one
 INSERT INTO issue_sync_config (
     workspace_id, integration_id, scope_type, scope_id, remote_project_ref,
-    sync_enabled, poll_interval_seconds, state_mapping,
+    sync_enabled, poll_interval_seconds, state_mapping, sync_mode, auto_accept_label,
     auto_assign_enabled, default_assignee_type, default_assignee_id
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8,
-    $9, $10, $11
+    $6, $7, $8, $9, $10,
+    $11, $12, $13
 )
-RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at
+RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label
 `
 
 type CreateIssueSyncConfigParams struct {
@@ -131,6 +131,8 @@ type CreateIssueSyncConfigParams struct {
 	SyncEnabled         bool        `json:"sync_enabled"`
 	PollIntervalSeconds pgtype.Int4 `json:"poll_interval_seconds"`
 	StateMapping        []byte      `json:"state_mapping"`
+	SyncMode            string      `json:"sync_mode"`
+	AutoAcceptLabel     string      `json:"auto_accept_label"`
 	AutoAssignEnabled   bool        `json:"auto_assign_enabled"`
 	DefaultAssigneeType pgtype.Text `json:"default_assignee_type"`
 	DefaultAssigneeID   pgtype.UUID `json:"default_assignee_id"`
@@ -146,6 +148,8 @@ func (q *Queries) CreateIssueSyncConfig(ctx context.Context, arg CreateIssueSync
 		arg.SyncEnabled,
 		arg.PollIntervalSeconds,
 		arg.StateMapping,
+		arg.SyncMode,
+		arg.AutoAcceptLabel,
 		arg.AutoAssignEnabled,
 		arg.DefaultAssigneeType,
 		arg.DefaultAssigneeID,
@@ -169,6 +173,8 @@ func (q *Queries) CreateIssueSyncConfig(ctx context.Context, arg CreateIssueSync
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncMode,
+		&i.AutoAcceptLabel,
 	)
 	return i, err
 }
@@ -301,7 +307,7 @@ func (q *Queries) GetIssueIntegrationInWorkspace(ctx context.Context, arg GetIss
 }
 
 const getIssueSyncConfigByScope = `-- name: GetIssueSyncConfigByScope :one
-SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at FROM issue_sync_config
+SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label FROM issue_sync_config
 WHERE workspace_id = $1 AND scope_type = $2 AND scope_id = $3
 `
 
@@ -336,12 +342,14 @@ func (q *Queries) GetIssueSyncConfigByScope(ctx context.Context, arg GetIssueSyn
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncMode,
+		&i.AutoAcceptLabel,
 	)
 	return i, err
 }
 
 const getIssueSyncConfigInWorkspace = `-- name: GetIssueSyncConfigInWorkspace :one
-SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at FROM issue_sync_config
+SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label FROM issue_sync_config
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -371,12 +379,14 @@ func (q *Queries) GetIssueSyncConfigInWorkspace(ctx context.Context, arg GetIssu
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncMode,
+		&i.AutoAcceptLabel,
 	)
 	return i, err
 }
 
 const listDueIssueSyncConfigs = `-- name: ListDueIssueSyncConfigs :many
-SELECT c.id, c.workspace_id, c.integration_id, c.scope_type, c.scope_id, c.remote_project_ref, c.sync_enabled, c.poll_interval_seconds, c.state_mapping, c.auto_assign_enabled, c.default_assignee_type, c.default_assignee_id, c.last_poll_at, c.last_successful_poll_at, c.last_error, c.created_at, c.updated_at FROM issue_sync_config c
+SELECT c.id, c.workspace_id, c.integration_id, c.scope_type, c.scope_id, c.remote_project_ref, c.sync_enabled, c.poll_interval_seconds, c.state_mapping, c.auto_assign_enabled, c.default_assignee_type, c.default_assignee_id, c.last_poll_at, c.last_successful_poll_at, c.last_error, c.created_at, c.updated_at, c.sync_mode, c.auto_accept_label FROM issue_sync_config c
 JOIN issue_integration i ON i.id = c.integration_id
 WHERE c.sync_enabled = true
   AND (
@@ -417,6 +427,8 @@ func (q *Queries) ListDueIssueSyncConfigs(ctx context.Context) ([]IssueSyncConfi
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SyncMode,
+			&i.AutoAcceptLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -468,7 +480,7 @@ func (q *Queries) ListIssueIntegrationsByWorkspace(ctx context.Context, workspac
 }
 
 const listIssueSyncConfigsByIntegration = `-- name: ListIssueSyncConfigsByIntegration :many
-SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at FROM issue_sync_config
+SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label FROM issue_sync_config
 WHERE workspace_id = $1 AND integration_id = $2
 ORDER BY created_at ASC
 `
@@ -505,6 +517,8 @@ func (q *Queries) ListIssueSyncConfigsByIntegration(ctx context.Context, arg Lis
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SyncMode,
+			&i.AutoAcceptLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -517,7 +531,7 @@ func (q *Queries) ListIssueSyncConfigsByIntegration(ctx context.Context, arg Lis
 }
 
 const listIssueSyncConfigsByWorkspace = `-- name: ListIssueSyncConfigsByWorkspace :many
-SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at FROM issue_sync_config
+SELECT id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label FROM issue_sync_config
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -549,6 +563,8 @@ func (q *Queries) ListIssueSyncConfigsByWorkspace(ctx context.Context, workspace
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SyncMode,
+			&i.AutoAcceptLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -566,7 +582,7 @@ SET last_poll_at = now(),
     last_error = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at
+RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label
 `
 
 type MarkIssueSyncPollFailureParams struct {
@@ -598,6 +614,8 @@ func (q *Queries) MarkIssueSyncPollFailure(ctx context.Context, arg MarkIssueSyn
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncMode,
+		&i.AutoAcceptLabel,
 	)
 	return i, err
 }
@@ -609,7 +627,7 @@ SET last_poll_at = now(),
     last_error = '',
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at
+RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label
 `
 
 // Records a successful poll: both watermarks advance to now() and any prior
@@ -636,6 +654,8 @@ func (q *Queries) MarkIssueSyncPollSuccess(ctx context.Context, id pgtype.UUID) 
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncMode,
+		&i.AutoAcceptLabel,
 	)
 	return i, err
 }
@@ -702,12 +722,14 @@ SET remote_project_ref = $3,
     sync_enabled = $4,
     poll_interval_seconds = $5,
     state_mapping = $6,
-    auto_assign_enabled = $7,
-    default_assignee_type = $8,
-    default_assignee_id = $9,
+    sync_mode = $7,
+    auto_accept_label = $8,
+    auto_assign_enabled = $9,
+    default_assignee_type = $10,
+    default_assignee_id = $11,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at
+RETURNING id, workspace_id, integration_id, scope_type, scope_id, remote_project_ref, sync_enabled, poll_interval_seconds, state_mapping, auto_assign_enabled, default_assignee_type, default_assignee_id, last_poll_at, last_successful_poll_at, last_error, created_at, updated_at, sync_mode, auto_accept_label
 `
 
 type UpdateIssueSyncConfigParams struct {
@@ -717,6 +739,8 @@ type UpdateIssueSyncConfigParams struct {
 	SyncEnabled         bool        `json:"sync_enabled"`
 	PollIntervalSeconds pgtype.Int4 `json:"poll_interval_seconds"`
 	StateMapping        []byte      `json:"state_mapping"`
+	SyncMode            string      `json:"sync_mode"`
+	AutoAcceptLabel     string      `json:"auto_accept_label"`
 	AutoAssignEnabled   bool        `json:"auto_assign_enabled"`
 	DefaultAssigneeType pgtype.Text `json:"default_assignee_type"`
 	DefaultAssigneeID   pgtype.UUID `json:"default_assignee_id"`
@@ -730,6 +754,8 @@ func (q *Queries) UpdateIssueSyncConfig(ctx context.Context, arg UpdateIssueSync
 		arg.SyncEnabled,
 		arg.PollIntervalSeconds,
 		arg.StateMapping,
+		arg.SyncMode,
+		arg.AutoAcceptLabel,
 		arg.AutoAssignEnabled,
 		arg.DefaultAssigneeType,
 		arg.DefaultAssigneeID,
@@ -753,6 +779,8 @@ func (q *Queries) UpdateIssueSyncConfig(ctx context.Context, arg UpdateIssueSync
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncMode,
+		&i.AutoAcceptLabel,
 	)
 	return i, err
 }

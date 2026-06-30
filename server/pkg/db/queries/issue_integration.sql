@@ -55,12 +55,12 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateIssueSyncConfig :one
 INSERT INTO issue_sync_config (
     workspace_id, integration_id, scope_type, scope_id, remote_project_ref,
-    sync_enabled, poll_interval_seconds, state_mapping,
+    sync_enabled, poll_interval_seconds, state_mapping, sync_mode, auto_accept_label,
     auto_assign_enabled, default_assignee_type, default_assignee_id
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8,
-    $9, $10, $11
+    $6, $7, $8, $9, $10,
+    $11, $12, $13
 )
 RETURNING *;
 
@@ -70,9 +70,11 @@ SET remote_project_ref = $3,
     sync_enabled = $4,
     poll_interval_seconds = $5,
     state_mapping = $6,
-    auto_assign_enabled = $7,
-    default_assignee_type = $8,
-    default_assignee_id = $9,
+    sync_mode = $7,
+    auto_accept_label = $8,
+    auto_assign_enabled = $9,
+    default_assignee_type = $10,
+    default_assignee_id = $11,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;

@@ -569,6 +569,8 @@ type IssueSyncConfig struct {
 	LastError            string             `json:"last_error"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	SyncMode             string             `json:"sync_mode"`
+	AutoAcceptLabel      string             `json:"auto_accept_label"`
 }
 
 type IssueToLabel struct {

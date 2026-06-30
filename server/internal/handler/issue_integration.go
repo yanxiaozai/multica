@@ -48,6 +48,8 @@ type IssueSyncConfigResponse struct {
 	SyncEnabled          bool           `json:"sync_enabled"`
 	PollIntervalSeconds  *int32         `json:"poll_interval_seconds"`
 	StateMapping         map[string]any `json:"state_mapping"`
+	SyncMode             string         `json:"sync_mode"`
+	AutoAcceptLabel      string         `json:"auto_accept_label"`
 	AutoAssignEnabled    bool           `json:"auto_assign_enabled"`
 	DefaultAssigneeType  *string        `json:"default_assignee_type"`
 	DefaultAssigneeID    *string        `json:"default_assignee_id"`
@@ -66,6 +68,8 @@ type upsertIssueSyncConfigRequest struct {
 	SyncEnabled         bool            `json:"sync_enabled"`
 	PollIntervalSeconds *int32          `json:"poll_interval_seconds"`
 	StateMapping        json.RawMessage `json:"state_mapping"`
+	SyncMode            string          `json:"sync_mode"`
+	AutoAcceptLabel     string          `json:"auto_accept_label"`
 	AutoAssignEnabled   bool            `json:"auto_assign_enabled"`
 	DefaultAssigneeType *string         `json:"default_assignee_type"`
 	DefaultAssigneeID   *string         `json:"default_assignee_id"`
@@ -273,6 +277,8 @@ func (h *Handler) CreateIssueSyncConfig(w http.ResponseWriter, r *http.Request) 
 		SyncEnabled:         input.syncEnabled,
 		PollIntervalSeconds: input.pollIntervalSeconds,
 		StateMapping:        input.stateMapping,
+		SyncMode:            input.syncMode,
+		AutoAcceptLabel:     input.autoAcceptLabel,
 		AutoAssignEnabled:   input.autoAssignEnabled,
 		DefaultAssigneeType: input.defaultAssigneeType,
 		DefaultAssigneeID:   input.defaultAssigneeID,
@@ -317,6 +323,8 @@ func (h *Handler) UpdateIssueSyncConfig(w http.ResponseWriter, r *http.Request) 
 		SyncEnabled:         input.syncEnabled,
 		PollIntervalSeconds: input.pollIntervalSeconds,
 		StateMapping:        input.stateMapping,
+		SyncMode:            input.syncMode,
+		AutoAcceptLabel:     input.autoAcceptLabel,
 		AutoAssignEnabled:   input.autoAssignEnabled,
 		DefaultAssigneeType: input.defaultAssigneeType,
 		DefaultAssigneeID:   input.defaultAssigneeID,
@@ -359,6 +367,8 @@ type normalizedIssueSyncConfigInput struct {
 	syncEnabled         bool
 	pollIntervalSeconds pgtype.Int4
 	stateMapping        []byte
+	syncMode            string
+	autoAcceptLabel     string
 	autoAssignEnabled   bool
 	defaultAssigneeType pgtype.Text
 	defaultAssigneeID   pgtype.UUID
@@ -409,9 +419,35 @@ func (h *Handler) normalizeIssueSyncConfigRequest(w http.ResponseWriter, r *http
 		return input, false
 	}
 	input.stateMapping = stateMapping
+	input.syncMode = strings.TrimSpace(req.SyncMode)
+	if input.syncMode == "" {
+		if existing != nil {
+			input.syncMode = existing.SyncMode
+		}
+		if input.syncMode == "" {
+			input.syncMode = issuebridge.SyncModeAssignedToMe
+		}
+	}
+	if input.syncMode != issuebridge.SyncModeAssignedToMe && input.syncMode != issuebridge.SyncModeAutoAccept {
+		writeError(w, http.StatusBadRequest, "sync_mode must be assigned_to_me or auto_accept")
+		return input, false
+	}
+	input.autoAcceptLabel = strings.TrimSpace(req.AutoAcceptLabel)
+	if input.autoAcceptLabel == "" {
+		if existing != nil {
+			input.autoAcceptLabel = existing.AutoAcceptLabel
+		}
+		if input.autoAcceptLabel == "" {
+			input.autoAcceptLabel = issuebridge.DefaultAutoAcceptLabel
+		}
+	}
 	input.autoAssignEnabled = req.AutoAssignEnabled
 	input.defaultAssigneeType, input.defaultAssigneeID, ok = h.issueSyncAssignee(w, r, workspaceID, req)
 	if !ok {
+		return input, false
+	}
+	if input.syncMode == issuebridge.SyncModeAutoAccept && !input.autoAssignEnabled {
+		writeError(w, http.StatusBadRequest, "auto_accept sync mode requires auto assignment")
 		return input, false
 	}
 	return input, true
@@ -564,6 +600,8 @@ func issueSyncConfigToResponse(row db.IssueSyncConfig) IssueSyncConfigResponse {
 		SyncEnabled:          row.SyncEnabled,
 		PollIntervalSeconds:  int4ToPtr(row.PollIntervalSeconds),
 		StateMapping:         decodeJSONObject(row.StateMapping),
+		SyncMode:             row.SyncMode,
+		AutoAcceptLabel:      row.AutoAcceptLabel,
 		AutoAssignEnabled:    row.AutoAssignEnabled,
 		DefaultAssigneeType:  textToPtr(row.DefaultAssigneeType),
 		DefaultAssigneeID:    uuidToPtr(row.DefaultAssigneeID),

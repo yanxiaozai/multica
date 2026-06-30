@@ -5,7 +5,7 @@ import { ChevronRight, GitBranch, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectResourcesOptions } from "@multica/core/projects";
 import {
   issueIntegrationsOptions,
@@ -41,6 +41,8 @@ interface AutoDetect {
   ref: string;
 }
 
+type AssigneeType = "agent" | "squad";
+
 // Project sidebar section: link a GitLab project and one-shot import the
 // issues assigned to the connection owner. The sync config (integration +
 // remote_project_ref) is created here so the import has a source to pull
@@ -67,6 +69,7 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
   const updateConfig = useUpdateIssueSyncConfig(wsId);
   const importIssues = useImportProjectGitLabIssues(wsId);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
 
   // Project resources — only `local_directory` ones point at a local git
   // working tree we can auto-detect from. github_repo resources have no
@@ -91,8 +94,32 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
   // separately so the user can stage changes and Save in one round-trip.
   const [pollEnabled, setPollEnabled] = useState(false);
   const [pollInterval, setPollInterval] = useState(300);
+  const [syncMode, setSyncMode] = useState<"assigned_to_me" | "auto_accept">(
+    "assigned_to_me",
+  );
+  const [autoAcceptLabel, setAutoAcceptLabel] = useState("ai-auto");
   const [autoAssign, setAutoAssign] = useState(false);
+  const [assigneeType, setAssigneeType] = useState<AssigneeType>("agent");
   const [agentId, setAgentId] = useState("");
+  const syncModeLabel =
+    syncMode === "auto_accept"
+      ? t(($) => $.gitlab_sync.sync_mode_auto_accept)
+      : t(($) => $.gitlab_sync.sync_mode_assigned_to_me);
+  const assigneeTypeLabel =
+    assigneeType === "squad"
+      ? t(($) => $.gitlab_sync.assignee_type_squad)
+      : t(($) => $.gitlab_sync.assignee_type_agent);
+  const visibleAssignees =
+    assigneeType === "squad"
+      ? squads.filter((squad) => !squad.archived_at)
+      : agents.filter((agent) => !agent.archived_at);
+  const selectedAssigneeName =
+    visibleAssignees.find((assignee) => assignee.id === agentId)?.name ?? "";
+  const selectedIntegrationName = integrationId
+    ? integrations.find((integration) => integration.id === integrationId)?.name ??
+      integrations.find((integration) => integration.id === integrationId)?.base_url ??
+      ""
+    : "";
 
   // Re-seed the form whenever the config row loads / changes. Without this a
   // save would clobber server state the user never saw.
@@ -100,7 +127,10 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
     if (!config) return;
     setPollEnabled(config.sync_enabled);
     setPollInterval(config.poll_interval_seconds ?? 300);
+    setSyncMode(config.sync_mode ?? "assigned_to_me");
+    setAutoAcceptLabel(config.auto_accept_label || "ai-auto");
     setAutoAssign(config.auto_assign_enabled);
+    setAssigneeType(config.default_assignee_type === "squad" ? "squad" : "agent");
     setAgentId(config.default_assignee_id ?? "");
   }, [config]);
 
@@ -200,8 +230,10 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
           remote_project_ref: config.remote_project_ref,
           sync_enabled: pollEnabled,
           poll_interval_seconds: pollEnabled ? pollInterval : null,
+          sync_mode: syncMode,
+          auto_accept_label: autoAcceptLabel.trim() || "ai-auto",
           auto_assign_enabled: autoAssign,
-          default_assignee_type: autoAssign ? "agent" : null,
+          default_assignee_type: autoAssign ? assigneeType : null,
           default_assignee_id: autoAssign ? agentId : null,
         },
       });
@@ -220,7 +252,10 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
     !!config &&
     (pollEnabled !== config.sync_enabled ||
       (config.poll_interval_seconds ?? 300) !== pollInterval ||
+      (config.sync_mode ?? "assigned_to_me") !== syncMode ||
+      (config.auto_accept_label || "ai-auto") !== autoAcceptLabel ||
       autoAssign !== config.auto_assign_enabled ||
+      (config.default_assignee_type ?? "agent") !== assigneeType ||
       (config.default_assignee_id ?? "") !== agentId);
 
   // One-click connect from an auto-detected match — skips the manual form.
@@ -325,54 +360,128 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
                 {t(($) => $.gitlab_sync.poll_toggle)}
               </label>
               {pollEnabled && (
-                <div>
-                  <Label className="text-[11px] text-muted-foreground">
-                    {t(($) => $.gitlab_sync.poll_interval_label)}
-                  </Label>
-                  <Input
-                    type="number"
-                    min={60}
-                    className="mt-1 h-8 text-xs"
-                    value={pollInterval}
-                    onChange={(e) =>
-                      setPollInterval(Number.parseInt(e.target.value, 10) || 60)
-                    }
-                  />
-                  <p className="mt-1 text-[11px] text-muted-foreground/70">
-                    {t(($) => $.gitlab_sync.poll_interval_hint)}
-                  </p>
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">
+                      {t(($) => $.gitlab_sync.poll_interval_label)}
+                    </Label>
+                    <Input
+                      type="number"
+                      min={60}
+                      className="mt-1 h-8 text-xs"
+                      value={pollInterval}
+                      onChange={(e) =>
+                        setPollInterval(Number.parseInt(e.target.value, 10) || 60)
+                      }
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground/70">
+                      {t(($) => $.gitlab_sync.poll_interval_hint)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">
+                      {t(($) => $.gitlab_sync.sync_mode_label)}
+                    </Label>
+                    <Select
+                      value={syncMode}
+                      onValueChange={(v) => {
+                        const next = v as "assigned_to_me" | "auto_accept";
+                        setSyncMode(next);
+                        if (next === "auto_accept") setAutoAssign(true);
+                      }}
+                    >
+                      <SelectTrigger className="mt-1 h-8 text-xs">
+                        <SelectValue>{syncModeLabel}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="assigned_to_me">
+                          {t(($) => $.gitlab_sync.sync_mode_assigned_to_me)}
+                        </SelectItem>
+                        <SelectItem value="auto_accept">
+                          {t(($) => $.gitlab_sync.sync_mode_auto_accept)}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1 text-[11px] text-muted-foreground/70">
+                      {syncMode === "auto_accept"
+                        ? t(($) => $.gitlab_sync.sync_mode_auto_accept_hint)
+                        : t(($) => $.gitlab_sync.poll_interval_hint)}
+                    </p>
+                  </div>
+
+                  {syncMode === "auto_accept" && (
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground">
+                        {t(($) => $.gitlab_sync.auto_accept_label)}
+                      </Label>
+                      <Input
+                        className="mt-1 h-8 text-xs"
+                        value={autoAcceptLabel}
+                        onChange={(e) => setAutoAcceptLabel(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
               <label className="flex items-center gap-2 text-xs">
                 <Checkbox
                   checked={autoAssign}
+                  disabled={syncMode === "auto_accept"}
                   onCheckedChange={(v) => setAutoAssign(v === true)}
                 />
                 {t(($) => $.gitlab_sync.auto_assign_toggle)}
               </label>
               {autoAssign && (
-                <div>
-                  <Label className="text-[11px] text-muted-foreground">
-                    {t(($) => $.gitlab_sync.agent_label)}
-                  </Label>
-                  <Select
-                    value={agentId}
-                    onValueChange={(v) => setAgentId(v ?? "")}
-                  >
-                    <SelectTrigger className="mt-1 h-8 text-xs">
-                      <SelectValue placeholder="—" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {agents
-                        .filter((a) => !a.archived_at)
-                        .map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.name}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">
+                      {t(($) => $.gitlab_sync.assignee_type_label)}
+                    </Label>
+                    <Select
+                      value={assigneeType}
+                      onValueChange={(v) => {
+                        setAssigneeType(v === "squad" ? "squad" : "agent");
+                        setAgentId("");
+                      }}
+                    >
+                      <SelectTrigger className="mt-1 h-8 text-xs">
+                        <SelectValue>{assigneeTypeLabel}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="agent">
+                          {t(($) => $.gitlab_sync.assignee_type_agent)}
+                        </SelectItem>
+                        <SelectItem value="squad">
+                          {t(($) => $.gitlab_sync.assignee_type_squad)}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">
+                      {t(($) => $.gitlab_sync.assignee_label)}
+                    </Label>
+                    <Select
+                      value={agentId}
+                      onValueChange={(v) => setAgentId(v ?? "")}
+                    >
+                      <SelectTrigger className="mt-1 h-8 text-xs">
+                        <SelectValue placeholder="—">
+                          {selectedAssigneeName || "—"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {visibleAssignees.map((assignee) => (
+                          <SelectItem key={assignee.id} value={assignee.id}>
+                            {assignee.name}
                           </SelectItem>
                         ))}
-                    </SelectContent>
-                  </Select>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
 
@@ -380,7 +489,11 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
                 size="sm"
                 className="h-7 w-full text-xs"
                 onClick={handleSaveSettings}
-                disabled={!dirty || updateConfig.isPending}
+                disabled={
+                  !dirty ||
+                  updateConfig.isPending ||
+                  (syncMode === "auto_accept" && !agentId)
+                }
               >
                 {updateConfig.isPending
                   ? t(($) => $.gitlab_sync.saving)
@@ -415,7 +528,9 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
                     onValueChange={(v) => setIntegrationId(v ?? "")}
                   >
                     <SelectTrigger className="mt-1 h-8 text-xs">
-                      <SelectValue placeholder="—" />
+                      <SelectValue placeholder="—">
+                        {selectedIntegrationName || "—"}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {integrations.map((itg) => (

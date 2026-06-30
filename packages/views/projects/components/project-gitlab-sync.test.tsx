@@ -23,12 +23,14 @@ const mocks = vi.hoisted(() => ({
     remote_project_ref: string;
     sync_enabled: boolean;
     poll_interval_seconds: number | null;
+    default_assignee_type: "agent" | "squad" | null;
     auto_assign_enabled: boolean;
     default_assignee_id: string | null;
     last_poll_at: string | null;
     last_error: string;
   }>,
   agents: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+  squads: [] as Array<{ id: string; name: string; archived_at: string | null }>,
   resources: [] as Array<{
     id: string;
     resource_type: string;
@@ -62,6 +64,7 @@ vi.mock("@multica/core/issue-bridge", () => ({
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
+  squadListOptions: () => ({ queryKey: ["squads"] }),
 }));
 
 vi.mock("@multica/core/projects", () => ({
@@ -88,6 +91,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "integrations") return { data: { integrations: mocks.integrations } };
     if (key === "sync-configs") return { data: { sync_configs: mocks.syncConfigs } };
     if (key === "agents") return { data: mocks.agents };
+    if (key === "squads") return { data: mocks.squads };
     if (key === "project-resources") return { data: mocks.resources };
     return { data: undefined };
   },
@@ -113,6 +117,7 @@ function projConfig(over: Partial<typeof mocks.syncConfigs[number]> = {}) {
     remote_project_ref: "group/proj",
     sync_enabled: false,
     poll_interval_seconds: 300,
+    default_assignee_type: null,
     auto_assign_enabled: false,
     default_assignee_id: null,
     last_poll_at: null,
@@ -127,6 +132,7 @@ describe("ProjectGitLabSyncSection", () => {
     mocks.integrations = [];
     mocks.syncConfigs = [];
     mocks.agents = [];
+    mocks.squads = [];
     mocks.resources = [];
     vi.mocked(detectGitRemote).mockResolvedValue({ ok: false, reason: "unsupported" });
   });
@@ -293,6 +299,39 @@ describe("ProjectGitLabSyncSection", () => {
           sync_enabled: true,
           auto_assign_enabled: true,
           default_assignee_type: "agent",
+        }),
+      }),
+    );
+  });
+
+  it("saves a squad as the auto-assignment target", async () => {
+    mocks.integrations = [{ id: "itg-1", name: "GitLab", base_url: "https://gitlab.example.com" }];
+    mocks.agents = [{ id: "agent-1", name: "Coder", archived_at: null }];
+    mocks.squads = [{ id: "squad-1", name: "Platform Squad", archived_at: null }];
+    mocks.syncConfigs = [
+      projConfig({
+        auto_assign_enabled: true,
+        default_assignee_type: "squad",
+        default_assignee_id: "squad-1",
+      }),
+    ];
+    renderSection();
+    fireEvent.click(screen.getByText("GitLab Sync"));
+
+    expect(screen.getByText("Platform Squad")).toBeInTheDocument();
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]!);
+    fireEvent.click(screen.getByText("Save"));
+
+    await Promise.resolve();
+    expect(mocks.updateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cfg-1",
+        data: expect.objectContaining({
+          sync_enabled: true,
+          auto_assign_enabled: true,
+          default_assignee_type: "squad",
+          default_assignee_id: "squad-1",
         }),
       }),
     );

@@ -43,6 +43,12 @@ func (q *syncTestQueries) CreateIssueBridgeItem(_ context.Context, arg db.Create
 	q.createdBridgeItems = append(q.createdBridgeItems, arg)
 	return db.IssueBridgeItem{}, nil
 }
+func (q *syncTestQueries) GetAgent(_ context.Context, id pgtype.UUID) (db.Agent, error) {
+	return db.Agent{ID: id}, nil
+}
+func (q *syncTestQueries) GetSquadInWorkspace(_ context.Context, arg db.GetSquadInWorkspaceParams) (db.Squad, error) {
+	return db.Squad{ID: arg.ID, WorkspaceID: arg.WorkspaceID, LeaderID: testUUID(250)}, nil
+}
 
 // Polling-path stubs — ImportProjectIssues (Phase A) doesn't call these, so
 // they keep syncTestQueries satisfying the expanded Queries interface.
@@ -102,15 +108,54 @@ func (f *fakeIssueCreator) Create(_ context.Context, p service.IssueCreateParams
 
 // fakeGitLabClient serves a fixed list of remote issues for ListProjectIssues.
 type fakeGitLabClient struct {
-	issues []GitLabIssue
-	err    error
+	issues    []GitLabIssue
+	err       error
+	user      GitLabUser
+	getIssues map[int64]GitLabIssue
+	listOpts  []ListIssuesOpts
+	assigned  []int64
+	notes     []string
 }
 
 func (f *fakeGitLabClient) TestConnection(context.Context) (GitLabUser, error) {
-	return GitLabUser{}, nil
+	if f.user.ID == 0 {
+		return GitLabUser{ID: 99, Username: "bot", Name: "Bot"}, nil
+	}
+	return f.user, nil
 }
-func (f *fakeGitLabClient) ListProjectIssues(_ context.Context, _ string, _ ListIssuesOpts) ([]GitLabIssue, error) {
+func (f *fakeGitLabClient) ListProjectIssues(_ context.Context, _ string, opts ListIssuesOpts) ([]GitLabIssue, error) {
+	f.listOpts = append(f.listOpts, opts)
 	return f.issues, f.err
+}
+func (f *fakeGitLabClient) GetProjectIssue(_ context.Context, _ string, iid int64) (GitLabIssue, error) {
+	if f.getIssues != nil {
+		if issue, ok := f.getIssues[iid]; ok {
+			return issue, nil
+		}
+	}
+	for _, issue := range f.issues {
+		if issue.IID == iid {
+			return issue, nil
+		}
+	}
+	return GitLabIssue{}, errors.New("not found")
+}
+func (f *fakeGitLabClient) AssignIssueToUser(_ context.Context, _ string, iid int64, userID int64) (GitLabIssue, error) {
+	f.assigned = append(f.assigned, iid)
+	issue, err := f.GetProjectIssue(context.Background(), "", iid)
+	if err != nil {
+		return GitLabIssue{}, err
+	}
+	issue.Assignees = []GitLabUser{{ID: userID, Username: "bot", Name: "Bot"}}
+	if f.getIssues == nil {
+		f.getIssues = map[int64]GitLabIssue{}
+	}
+	f.getIssues[iid] = issue
+	return issue, nil
+}
+func (f *fakeGitLabClient) CreateIssueNote(_ context.Context, _ string, _ int64, body string) error {
+	f.notes = append(f.notes, body)
+	return nil
 }
 
 func newSyncService(q *syncTestQueries, creator *fakeIssueCreator, client *fakeGitLabClient) *Service {
@@ -211,9 +256,9 @@ func TestImportProjectIssues_SkipsAlreadyMapped(t *testing.T) {
 	integID := testUUID(12)
 
 	q := &syncTestQueries{
-		syncConfig:   db.IssueSyncConfig{ID: testUUID(13), WorkspaceID: wsID, IntegrationID: integID, ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p", StateMapping: []byte(`{"opened":"backlog","closed":"done"}`)},
-		integration:  seedIntegration(wsID, integID),
-		existing:     map[int64]bool{7: true}, // iid 7 already imported
+		syncConfig:  db.IssueSyncConfig{ID: testUUID(13), WorkspaceID: wsID, IntegrationID: integID, ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p", StateMapping: []byte(`{"opened":"backlog","closed":"done"}`)},
+		integration: seedIntegration(wsID, integID),
+		existing:    map[int64]bool{7: true}, // iid 7 already imported
 	}
 	q.integration.EncryptedToken = sealedToken("tok")
 	creator := &fakeIssueCreator{}
@@ -246,7 +291,7 @@ func TestImportProjectIssues_AutoAssignStampsAgent(t *testing.T) {
 		syncConfig: db.IssueSyncConfig{
 			ID: testUUID(24), WorkspaceID: wsID, IntegrationID: integID,
 			ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p",
-			StateMapping: []byte(`{"opened":"todo","closed":"done"}`),
+			StateMapping:      []byte(`{"opened":"todo","closed":"done"}`),
 			AutoAssignEnabled: true, DefaultAssigneeType: pgtype.Text{String: "agent", Valid: true},
 			DefaultAssigneeID: agentID,
 		},
@@ -288,9 +333,9 @@ func TestImportProjectIssues_PartialCreateFailureContinues(t *testing.T) {
 	integID := testUUID(42)
 
 	q := &syncTestQueries{
-		syncConfig:   db.IssueSyncConfig{ID: testUUID(43), WorkspaceID: wsID, IntegrationID: integID, ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p", StateMapping: []byte(`{"opened":"backlog","closed":"done"}`)},
-		integration:  seedIntegration(wsID, integID),
-		existing:     map[int64]bool{},
+		syncConfig:  db.IssueSyncConfig{ID: testUUID(43), WorkspaceID: wsID, IntegrationID: integID, ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p", StateMapping: []byte(`{"opened":"backlog","closed":"done"}`)},
+		integration: seedIntegration(wsID, integID),
+		existing:    map[int64]bool{},
 	}
 	q.integration.EncryptedToken = sealedToken("tok")
 	// First create fails, second succeeds — the batch must continue past

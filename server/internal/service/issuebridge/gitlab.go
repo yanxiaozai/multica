@@ -120,13 +120,14 @@ func (c *GitLabClient) TestConnection(ctx context.Context) (GitLabUser, error) {
 // names match the GitLab REST API JSON (`iid`, `title`, `description`,
 // `state`, `web_url`, `updated_at`).
 type GitLabIssue struct {
-	IID          int64          `json:"iid"`
-	Title        string         `json:"title"`
-	Description  string         `json:"description"`
-	State        string         `json:"state"` // "opened" | "closed"
-	WebURL       string         `json:"web_url"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	Assignees    []GitLabUser   `json:"assignees"`
+	IID         int64        `json:"iid"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	State       string       `json:"state"` // "opened" | "closed"
+	WebURL      string       `json:"web_url"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	Assignees   []GitLabUser `json:"assignees"`
+	Labels      []string     `json:"labels"`
 }
 
 // ListIssuesOpts filters and bounds a ListProjectIssues call.
@@ -141,6 +142,10 @@ type ListIssuesOpts struct {
 	// UpdatedAfter (Phase B) requests only issues updated since this
 	// timestamp for incremental polling. Zero value = no filter.
 	UpdatedAfter time.Time
+	// Labels filters issues by all listed GitLab labels.
+	Labels []string
+	// Unassigned adds assignee_id=None so GitLab returns only unassigned issues.
+	Unassigned bool
 	// PerPage is the page size (GitLab max 100). Defaults to 100.
 	PerPage int
 	// MaxPages caps pagination so a huge project can't stall an import
@@ -203,6 +208,12 @@ func (c *GitLabClient) ListProjectIssues(ctx context.Context, projectRef string,
 		if opts.AssignedToMe {
 			q.Set("scope", "assigned_to_me")
 		}
+		if opts.Unassigned {
+			q.Set("assignee_id", "None")
+		}
+		if len(opts.Labels) > 0 {
+			q.Set("labels", strings.Join(opts.Labels, ","))
+		}
 		if s := strings.TrimSpace(opts.State); s != "" && s != "all" {
 			q.Set("state", s)
 		}
@@ -251,6 +262,120 @@ func (c *GitLabClient) ListProjectIssues(ctx context.Context, projectRef string,
 		page = nextPage
 	}
 	return all, nil
+}
+
+func (c *GitLabClient) GetProjectIssue(ctx context.Context, projectRef string, iid int64) (GitLabIssue, error) {
+	endpoint, httpClient, err := c.issueEndpoint(projectRef, iid)
+	if err != nil {
+		return GitLabIssue{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return GitLabIssue{}, err
+	}
+	c.authorize(req)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return GitLabIssue{}, fmt.Errorf("gitlab get issue failed: %w", err)
+	}
+	return decodeGitLabIssueResponse(resp, "gitlab get issue")
+}
+
+func (c *GitLabClient) AssignIssueToUser(ctx context.Context, projectRef string, iid int64, userID int64) (GitLabIssue, error) {
+	if userID <= 0 {
+		return GitLabIssue{}, fmt.Errorf("gitlab assignee user id is required")
+	}
+	endpoint, httpClient, err := c.issueEndpoint(projectRef, iid)
+	if err != nil {
+		return GitLabIssue{}, err
+	}
+	form := url.Values{}
+	form.Add("assignee_ids[]", strconv.FormatInt(userID, 10))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return GitLabIssue{}, err
+	}
+	c.authorize(req)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return GitLabIssue{}, fmt.Errorf("gitlab assign issue failed: %w", err)
+	}
+	return decodeGitLabIssueResponse(resp, "gitlab assign issue")
+}
+
+func (c *GitLabClient) CreateIssueNote(ctx context.Context, projectRef string, iid int64, body string) error {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return fmt.Errorf("gitlab issue note body is required")
+	}
+	endpoint, httpClient, err := c.issueEndpoint(projectRef, iid)
+	if err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("body", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/notes", strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	c.authorize(req)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("gitlab create issue note failed: %w", err)
+	}
+	defer resp.Body.Close()
+	bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return fmt.Errorf("gitlab create issue note: read response: %w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return httpErrorForStatus(resp.StatusCode, bodyBytes)
+	}
+	return nil
+}
+
+func (c *GitLabClient) issueEndpoint(projectRef string, iid int64) (string, *http.Client, error) {
+	if c == nil {
+		return "", nil, fmt.Errorf("gitlab client is nil")
+	}
+	if strings.TrimSpace(c.token) == "" {
+		return "", nil, fmt.Errorf("gitlab token is required")
+	}
+	ref := NormalizeProjectRef(projectRef)
+	if ref == "" {
+		return "", nil, fmt.Errorf("gitlab project ref is required")
+	}
+	if iid <= 0 {
+		return "", nil, fmt.Errorf("gitlab issue iid is required")
+	}
+	httpClient := c.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: listIssueTimeout}
+	}
+	return c.baseURL + "/api/v4/projects/" + url.PathEscape(ref) + "/issues/" + strconv.FormatInt(iid, 10), httpClient, nil
+}
+
+func (c *GitLabClient) authorize(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+}
+
+func decodeGitLabIssueResponse(resp *http.Response, context string) (GitLabIssue, error) {
+	defer resp.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return GitLabIssue{}, fmt.Errorf("%s: read response: %w", context, readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return GitLabIssue{}, httpErrorForStatus(resp.StatusCode, body)
+	}
+	var issue GitLabIssue
+	if err := json.Unmarshal(body, &issue); err != nil {
+		return GitLabIssue{}, fmt.Errorf("%s: decode response: %w", context, err)
+	}
+	return issue, nil
 }
 
 // NormalizeProjectRef cleans a user-entered GitLab project reference into the

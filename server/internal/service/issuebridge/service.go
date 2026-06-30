@@ -18,6 +18,9 @@ const (
 	DefaultIntegrationName     = "GitLab"
 	MinPollIntervalSeconds     = 60
 	DefaultPollIntervalSeconds = 300
+	SyncModeAssignedToMe       = "assigned_to_me"
+	SyncModeAutoAccept         = "auto_accept"
+	DefaultAutoAcceptLabel     = "ai-auto"
 )
 
 type Queries interface {
@@ -33,6 +36,8 @@ type Queries interface {
 	GetIssueSyncConfigByScope(context.Context, db.GetIssueSyncConfigByScopeParams) (db.IssueSyncConfig, error)
 	GetIssueBridgeItemByRemote(context.Context, db.GetIssueBridgeItemByRemoteParams) (db.IssueBridgeItem, error)
 	CreateIssueBridgeItem(context.Context, db.CreateIssueBridgeItemParams) (db.IssueBridgeItem, error)
+	GetAgent(context.Context, pgtype.UUID) (db.Agent, error)
+	GetSquadInWorkspace(context.Context, db.GetSquadInWorkspaceParams) (db.Squad, error)
 	// Polling path (Phase B): pick due configs + record poll watermarks.
 	ListDueIssueSyncConfigs(context.Context) ([]db.IssueSyncConfig, error)
 	MarkIssueSyncPollSuccess(context.Context, pgtype.UUID) (db.IssueSyncConfig, error)
@@ -54,6 +59,9 @@ type GitLabConnectionTester interface {
 type GitLabClientAPI interface {
 	GitLabConnectionTester
 	ListProjectIssues(ctx context.Context, projectRef string, opts ListIssuesOpts) ([]GitLabIssue, error)
+	GetProjectIssue(ctx context.Context, projectRef string, iid int64) (GitLabIssue, error)
+	AssignIssueToUser(ctx context.Context, projectRef string, iid int64, userID int64) (GitLabIssue, error)
+	CreateIssueNote(ctx context.Context, projectRef string, iid int64, body string) error
 }
 
 type ClientFactory func(baseURL, token string) (GitLabClientAPI, error)

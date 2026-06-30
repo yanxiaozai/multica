@@ -490,6 +490,8 @@ describe("GitLabIssuesTab", () => {
         scope_type: "project",
         scope_id: "project-2",
         remote_project_ref: "acme/backend",
+        sync_mode: "assigned_to_me",
+        auto_accept_label: "ai-auto",
         sync_enabled: true,
         poll_interval_seconds: 120,
         state_mapping: { opened: "backlog", closed: "done" },
@@ -561,6 +563,43 @@ describe("GitLabIssuesTab", () => {
       );
     });
     expect(mockCreateRule).not.toHaveBeenCalled();
+  });
+
+  it("creates an auto-accept sync rule with a default assignee", async () => {
+    const user = userEvent.setup();
+    integrationsRef.current = [
+      {
+        id: "gitlab-1",
+        name: "Work GitLab",
+        base_url: "https://gitlab.example.com",
+        default_issue_skill_id: "skill-other",
+        polling_enabled: true,
+        default_poll_interval_seconds: 600,
+        config: {},
+      },
+    ];
+    renderTab();
+
+    await user.click(screen.getByRole("button", { name: /^Add rule$/ }));
+    await user.selectOptions(screen.getByLabelText(/^Project or resource$/), "project-1");
+    await user.type(screen.getByLabelText(/^GitLab project ref$/), "acme/service");
+    await user.selectOptions(screen.getByLabelText(/^Sync mode$/), "auto_accept");
+    await user.selectOptions(screen.getByLabelText(/^Assignee type$/), "agent");
+    await user.selectOptions(screen.getByLabelText(/^Default assignee$/), "agent-1");
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => {
+      expect(mockCreateRule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          remote_project_ref: "acme/service",
+          sync_mode: "auto_accept",
+          auto_accept_label: "ai-auto",
+          auto_assign_enabled: true,
+          default_assignee_type: "agent",
+          default_assignee_id: "agent-1",
+        }),
+      );
+    });
   });
 
   it("saves auto-assignment to an agent", async () => {

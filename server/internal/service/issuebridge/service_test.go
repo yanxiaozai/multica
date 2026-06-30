@@ -343,6 +343,14 @@ func (f *fakeQueries) CreateIssueBridgeItem(context.Context, db.CreateIssueBridg
 	return db.IssueBridgeItem{}, errors.New("not implemented")
 }
 
+func (f *fakeQueries) GetAgent(context.Context, pgtype.UUID) (db.Agent, error) {
+	return db.Agent{}, errors.New("not implemented")
+}
+
+func (f *fakeQueries) GetSquadInWorkspace(context.Context, db.GetSquadInWorkspaceParams) (db.Squad, error) {
+	return db.Squad{}, errors.New("not implemented")
+}
+
 // Polling-path queries (Phase B). Stubs; the real coverage is in
 // sync_poll_test.go via pollTestQueries.
 func (f *fakeQueries) ListDueIssueSyncConfigs(context.Context) ([]db.IssueSyncConfig, error) {
