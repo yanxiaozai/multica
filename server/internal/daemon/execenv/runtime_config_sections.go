@@ -70,6 +70,7 @@ func writeAgentIdentity(b *strings.Builder, ctx TaskContextForEnv) {
 			b.WriteString(ctx.AgentInstructions)
 			b.WriteString("\n\n")
 		}
+		writeAgentSpecProfile(b, ctx)
 		return
 	}
 	if ctx.AgentInstructions != "" {
@@ -77,6 +78,19 @@ func writeAgentIdentity(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString(ctx.AgentInstructions)
 		b.WriteString("\n\n")
 	}
+	writeAgentSpecProfile(b, ctx)
+}
+
+func writeAgentSpecProfile(b *strings.Builder, ctx TaskContextForEnv) {
+	profile := strings.TrimSpace(ctx.AgentSpecProfile)
+	if profile == "" || profile == "{}" || profile == "null" {
+		return
+	}
+	b.WriteString("## Spec Memory Role Profile\n\n")
+	b.WriteString("This is the agent's structured contribution profile for project `.spec` memory. Follow the global `## Spec Memory` protocol for storage rules; use this profile only to determine which durable documents and review roles this agent owns.\n\n")
+	b.WriteString("```json\n")
+	b.WriteString(profile)
+	b.WriteString("\n```\n\n")
 }
 
 // writeRequestingUser emits the Requesting User block when the runtime
@@ -329,20 +343,31 @@ func writeWorkflowComment(b *strings.Builder, provider string, ctx TaskContextFo
 	}
 	fmt.Fprintf(b, "4. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 	if ctx.IsSquadLeader {
-		b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
-		fmt.Fprintf(b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
+		b.WriteString("5. **Act only as squad leader.** Decide whether the new comment requires squad action. Do NOT implement the requested work yourself, edit files, run build/test commands as delivery evidence, or move the issue to `in_review`.\n")
+		b.WriteString("6. If action IS needed: delegate exactly once to the best squad member using the exact mention markdown from your Squad Roster, with a concise instruction. Do not solve the issue in the leader turn.\n")
+		fmt.Fprintf(b, "7. Record the evaluation with `multica squad activity %s action --reason \"...\"` after delegating. If no action is needed, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce no_action, exiting silently, or acknowledging another agent.\n", ctx.IssueID, ctx.IssueID)
 	} else {
 		b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+		b.WriteString("6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
+		b.WriteString("7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
+		b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
 	}
-	b.WriteString("6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
-	b.WriteString("7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
-	b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
 	b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
 	b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 }
 
 // writeWorkflowAssignment emits the assignment-triggered workflow.
 func writeWorkflowAssignment(b *strings.Builder, ctx TaskContextForEnv) {
+	if ctx.IsSquadLeader {
+		b.WriteString("You are acting as the squad leader for this assignment. Your job is delegation and coordination only.\n\n")
+		fmt.Fprintf(b, "1. Run `multica issue get %s --output json` to understand the task\n", ctx.IssueID)
+		fmt.Fprintf(b, "2. Run `multica issue metadata list %s --output json` and `multica issue comment list %s --recent 10 --output json` to catch up on prior context\n", ctx.IssueID, ctx.IssueID)
+		b.WriteString("3. Choose the best squad member from your Squad Roster and squad instructions. Prefer the member whose role and skills cover the requested work.\n")
+		b.WriteString("4. Delegate exactly once: either post one concise `multica issue comment add` comment with the member's exact mention markdown, or create a child issue assigned to that member. Pick one path; never both for the same work.\n")
+		fmt.Fprintf(b, "5. Run `multica squad activity %s action --reason \"<short reason>\"` after delegating. If no suitable member exists, record `failed` or `no_action` with the reason instead.\n", ctx.IssueID)
+		b.WriteString("6. Stop immediately after the delegation/activity record. Do NOT implement the issue yourself, edit files, run build/test commands as delivery evidence, or move the issue to `in_progress` / `in_review`.\n\n")
+		return
+	}
 	b.WriteString("You are responsible for managing the issue status throughout your work, unless your Agent Identity forbids issue status changes.\n\n")
 	fmt.Fprintf(b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
 	fmt.Fprintf(b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
@@ -440,7 +465,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n")
 	default:
 		if ctx.IsSquadLeader {
-			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
+			b.WriteString("⚠️ **Squad leader output is delegation, not implementation.** For `action`, the delegation comment or child issue plus `multica squad activity` is the result. For `no_action`, `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. Do NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently. Do NOT post an implementation summary, delivery evidence, or a status-change result as if you completed the work yourself.\n\n")
 		} else {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
 		}

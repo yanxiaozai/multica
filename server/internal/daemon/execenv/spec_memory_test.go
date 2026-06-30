@@ -17,6 +17,24 @@ func TestSlimRuntimeBriefIncludesSpecMemory(t *testing.T) {
 	assertSpecMemoryBrief(t, brief)
 }
 
+func TestRuntimeBriefIncludesAgentSpecProfile(t *testing.T) {
+	withLegacyBrief(t)
+	brief := buildMetaSkillContent("codex", TaskContextForEnv{
+		AgentName:        "seven",
+		AgentSpecProfile: `{"primary_outputs":["requirements.md"],"audit_role":"requirements-gate"}`,
+	})
+	assertAgentSpecProfile(t, brief)
+}
+
+func TestSlimRuntimeBriefIncludesAgentSpecProfile(t *testing.T) {
+	withSlimBrief(t)
+	brief := buildMetaSkillContent("codex", TaskContextForEnv{
+		AgentName:        "seven",
+		AgentSpecProfile: `{"primary_outputs":["requirements.md"],"audit_role":"requirements-gate"}`,
+	})
+	assertAgentSpecProfile(t, brief)
+}
+
 func withLegacyBrief(t *testing.T) {
 	t.Helper()
 	saved := runtimeFlags.Load()
@@ -36,6 +54,20 @@ func assertSpecMemoryBrief(t *testing.T, brief string) {
 		"--skip-audit-reason",
 		"multica spec handoff --issue <id>",
 		"Do not write current owner",
+	} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("runtime brief missing %q\n%s", want, brief)
+		}
+	}
+}
+
+func assertAgentSpecProfile(t *testing.T, brief string) {
+	t.Helper()
+	for _, want := range []string{
+		"## Spec Memory Role Profile",
+		"structured contribution profile",
+		`"primary_outputs":["requirements.md"]`,
+		`"audit_role":"requirements-gate"`,
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("runtime brief missing %q\n%s", want, brief)

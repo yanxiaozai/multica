@@ -40,9 +40,18 @@ func BuildPrompt(task Task, provider string) string {
 		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
+	if isSquadLeaderTask(task) {
+		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` and `multica issue comment list %s --recent 10 --output json` to understand the work, then act only as the squad leader: choose the right squad member, delegate with the exact mention markdown from your Squad Roster, record `multica squad activity %s action --reason \"...\"`, and stop.\n", task.IssueID, task.IssueID, task.IssueID)
+		b.WriteString("Do NOT implement the issue yourself, edit files, run build/test commands as if you owned delivery, or set the issue status to `in_review`. If no squad member is suitable, record `failed` or `no_action` with a short reason and stop.\n")
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
+}
+
+func isSquadLeaderTask(task Task) bool {
+	return task.Agent != nil && strings.Contains(task.Agent.Instructions, "## Squad Operating Protocol")
 }
 
 func buildSquadInstructionsGenerationPrompt(task Task) string {
@@ -176,7 +185,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
 		}
 		if task.Agent != nil && strings.Contains(task.Agent.Instructions, "## Squad Operating Protocol") {
-			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise.\n\n", task.IssueID)
+			fmt.Fprintf(&b, "⚠️ **Squad leader rule:** You are coordinating this comment, not implementing it. If action is needed, delegate to the best squad member with the exact mention markdown from your Squad Roster, then call `multica squad activity %s action --reason \"...\"` and exit. Do NOT edit files, run build/test commands as delivery evidence, or set the issue status to `in_review` yourself. If no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post a comment saying \"no action needed\" or \"exiting silently\".\n\n", task.IssueID, task.IssueID)
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)

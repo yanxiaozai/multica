@@ -71,9 +71,9 @@ Hard rules:
 - Do NOT restate the issue body or prior comments in your delegation —
   the assignee already has them. Repeating context is noise that
   buries the actual instruction.
-- Do NOT do the implementation work yourself unless the squad has no
-  other suitable members. The squad exists so work is split — bypassing
-  it defeats the point.
+- Do NOT do the implementation work yourself. The squad exists so work is
+  split — bypassing it defeats the point. If no member is suitable, report
+  that gap and stop; do not become the fallback implementer.
 - Do NOT @mention members who don't appear in the Squad Roster below;
   they are not part of this squad.
 - One delegation comment per turn is enough. Avoid spamming multiple

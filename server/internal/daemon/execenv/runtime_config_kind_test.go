@@ -246,6 +246,72 @@ func TestSquadInstructionsGenerationOutputDoesNotRequireIssueComment(t *testing.
 	}
 }
 
+func TestSlimAssignmentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	withSlimBrief(t)
+
+	const issueID = "issue-squad-slim"
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:       issueID,
+		IsSquadLeader: true,
+	})
+
+	for _, want := range []string{
+		"You are acting as the squad leader for this assignment.",
+		"Your job is delegation and coordination only.",
+		"Choose the best squad member from your Squad Roster",
+		"Delegate exactly once",
+		"multica squad activity " + issueID + " action",
+		"Stop immediately after the delegation/activity record.",
+		"Do NOT implement the issue yourself",
+		"Squad leader output is delegation, not implementation.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slim squad-leader assignment brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"Complete the task within your Agent Identity boundaries.",
+		"Run `multica issue status " + issueID + " in_progress`",
+		"When done, run `multica issue status " + issueID + " in_review`",
+		"Final results MUST be delivered via `multica issue comment add`",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("slim squad-leader assignment brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
+func TestSlimCommentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	withSlimBrief(t)
+
+	const issueID = "issue-squad-comment-slim"
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: "comment-1",
+		IsSquadLeader:    true,
+	})
+
+	for _, want := range []string{
+		"Act only as squad leader.",
+		"delegate exactly once to the best squad member",
+		"Do not solve the issue in the leader turn.",
+		"multica squad activity " + issueID + " action",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slim comment-triggered squad-leader brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"do any requested work first",
+		"post the result via step 7",
+		"If you produced actual work this turn",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("slim comment-triggered squad-leader brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
 // TestSlimQuickCreateAvailableCommands locks the minimal-variant content
 // for quick-create's Available Commands: `issue create` present, every
 // other Core command absent (the hard guardrails forbid the call).

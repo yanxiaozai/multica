@@ -575,8 +575,8 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 	}, "claude")
 
 	for _, want := range []string{
-		"Squad leader no_action rule",
-		"DO NOT post any comment",
+		"Squad leader rule",
+		"Do NOT edit files",
 		"multica squad activity",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -597,7 +597,7 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 		},
 	}, "claude")
 
-	if strings.Contains(nonLeaderPrompt, "Squad leader no_action rule") {
+	if strings.Contains(nonLeaderPrompt, "Squad leader rule") {
 		t.Fatalf("non-squad-leader prompt should NOT contain squad leader rule\n---\n%s", nonLeaderPrompt)
 	}
 }

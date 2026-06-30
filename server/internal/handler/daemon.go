@@ -1304,6 +1304,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		var specProfile json.RawMessage
+		if sp := bytes.TrimSpace(agent.SpecProfile); len(sp) > 0 && !bytes.Equal(sp, []byte("{}")) && !bytes.Equal(sp, []byte("null")) {
+			specProfile = json.RawMessage(agent.SpecProfile)
+		}
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any
 		// provider-specific tuning. Forward only non-empty payloads so the
@@ -1316,6 +1320,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
 			Instructions:  agent.Instructions,
+			SpecProfile:   specProfile,
 			CustomEnv:     customEnv,
 			CustomArgs:    customArgs,
 			McpConfig:     mcpConfig,

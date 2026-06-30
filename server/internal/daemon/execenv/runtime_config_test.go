@@ -299,6 +299,72 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
+func TestAssignmentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	t.Parallel()
+	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+	ctx := TaskContextForEnv{
+		IssueID:       issueID,
+		IsSquadLeader: true,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"You are acting as the squad leader for this assignment.",
+		"Your job is delegation and coordination only.",
+		"Choose the best squad member from your Squad Roster",
+		"Delegate exactly once",
+		"multica squad activity " + issueID + " action",
+		"Stop immediately after the delegation/activity record.",
+		"Do NOT implement the issue yourself",
+		"Squad leader output is delegation, not implementation.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad-leader assignment brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"Complete the task within your Agent Identity boundaries.",
+		"Run `multica issue status " + issueID + " in_progress`",
+		"When done, run `multica issue status " + issueID + " in_review`",
+		"Final results MUST be delivered via `multica issue comment add`",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("squad-leader assignment brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
+func TestCommentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	t.Parallel()
+	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+	ctx := TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: "comment-1",
+		IsSquadLeader:    true,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"Act only as squad leader.",
+		"delegate exactly once to the best squad member",
+		"Do not solve the issue in the leader turn.",
+		"multica squad activity " + issueID + " action",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("comment-triggered squad-leader brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"do any requested work first",
+		"post the result via step 7",
+		"If you produced actual work this turn",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("comment-triggered squad-leader brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
 func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
