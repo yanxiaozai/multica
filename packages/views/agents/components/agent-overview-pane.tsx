@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  BookCheck,
   BookOpenText,
   FileText,
   KeyRound,
@@ -29,6 +30,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
+import { SpecProfileTab } from "./tabs/spec-profile-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
@@ -42,6 +44,7 @@ export type DetailTab =
   | "activity"
   | "tasks"
   | "instructions"
+  | "spec_profile"
   | "skills"
   | "env"
   | "custom_args"
@@ -49,10 +52,11 @@ export type DetailTab =
   | "integrations"
   | "runtime_config";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "spec_profile" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
+  spec_profile: "spec_profile",
   skills: "skills",
   env: "environment",
   custom_args: "custom_args",
@@ -68,6 +72,7 @@ const detailTabs: {
   { id: "activity", icon: Activity },
   { id: "tasks", icon: ListTodo },
   { id: "instructions", icon: FileText },
+  { id: "spec_profile", icon: BookCheck },
   { id: "skills", icon: BookOpenText },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
@@ -242,6 +247,15 @@ export function AgentOverviewPane({
             <InstructionsTab
               agent={agent}
               onSave={(instructions) => onUpdate(agent.id, { instructions })}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {effectiveTab === "spec_profile" && (
+          <TabContent>
+            <SpecProfileTab
+              agent={agent}
+              onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
           </TabContent>

@@ -199,6 +199,7 @@
     "activity": "アクティビティ",
     "tasks": "タスク",
     "instructions": "指示",
+    "spec_profile": "Spec Profile",
     "skills": "スキル",
     "environment": "環境",
     "custom_args": "カスタム引数",
@@ -288,6 +289,15 @@
     "instructions": {
       "intro": "このエージェントのアイデンティティと作業スタイルを定義します。すべてのタスクでエージェントのコンテキストに注入されます。Markdown に対応しています。",
       "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う"
+    },
+    "spec_profile": {
+      "intro": "構造化された Spec Memory の役割プロフィールです。このエージェントが担当する長期 .spec ドキュメントを宣言します。全体の保存ルールはプラットフォーム prompt 側にあります。",
+      "placeholder": "{\n  \"primary_outputs\": [\"requirements.md\"],\n  \"contributes\": [\"acceptance.md\"],\n  \"audit_role\": \"requirements-gate\"\n}",
+      "editor_aria": "Spec profile JSON editor",
+      "invalid_json": "無効な JSON: {{error}}",
+      "invalid_not_object": "Spec profile は JSON object である必要があります。",
+      "saved_toast": "Spec profile を保存しました",
+      "save_failed_toast": "Spec profile を保存できませんでした"
     },
     "env": {
       "intro_readonly": "エージェントプロセスの起動時に注入されます。値の読み取りや編集ができるのはワークスペースのオーナーと admin のみで、すべての表示と編集はワークスペースの監査ログに記録されます。",

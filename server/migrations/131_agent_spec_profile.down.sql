@@ -1,0 +1,3 @@
+ALTER TABLE agent
+DROP COLUMN IF EXISTS spec_profile;
+

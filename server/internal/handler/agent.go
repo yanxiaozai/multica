@@ -38,6 +38,7 @@ type AgentResponse struct {
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
 	Instructions  string          `json:"instructions"`
+	SpecProfile   any             `json:"spec_profile"`
 	AvatarURL     *string         `json:"avatar_url"`
 	RuntimeMode   string          `json:"runtime_mode"`
 	RuntimeConfig any             `json:"runtime_config"`
@@ -116,6 +117,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 	if a.McpConfig != nil {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
+	specProfile := jsonObjectResponse(a.SpecProfile)
 
 	return AgentResponse{
 		ID:                 uuidToString(a.ID),
@@ -124,6 +126,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Name:               a.Name,
 		Description:        a.Description,
 		Instructions:       a.Instructions,
+		SpecProfile:        specProfile,
 		AvatarURL:          textToPtr(a.AvatarUrl),
 		RuntimeMode:        a.RuntimeMode,
 		RuntimeConfig:      rc,
@@ -143,6 +146,41 @@ func agentToResponse(a db.Agent) AgentResponse {
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
 		ArchivedBy:         uuidToPtr(a.ArchivedBy),
 	}
+}
+
+func jsonObjectResponse(raw []byte) any {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return map[string]any{}
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return map[string]any{}
+	}
+	if value == nil {
+		return map[string]any{}
+	}
+	if obj, ok := value.(map[string]any); ok {
+		return obj
+	}
+	return map[string]any{}
+}
+
+func normalizeJSONObjectField(raw json.RawMessage, fieldName string) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []byte("{}"), nil
+	}
+	var value any
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return nil, fmt.Errorf("%s must be valid JSON: %w", fieldName, err)
+	}
+	if value == nil {
+		return []byte("{}"), nil
+	}
+	if _, ok := value.(map[string]any); !ok {
+		return nil, fmt.Errorf("%s must be a JSON object", fieldName)
+	}
+	return append([]byte(nil), trimmed...), nil
 }
 
 // maskGatewayToken replaces runtime_config.gateway.token with the public
@@ -348,6 +386,7 @@ type TaskAgentData struct {
 	ID            string                      `json:"id"`
 	Name          string                      `json:"name"`
 	Instructions  string                      `json:"instructions"`
+	SpecProfile   json.RawMessage             `json:"spec_profile,omitempty"`
 	Skills        []service.AgentSkillData    `json:"skills,omitempty"`
 	SkillRefs     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
 	CustomEnv     map[string]string           `json:"custom_env,omitempty"`
@@ -675,6 +714,7 @@ type CreateAgentRequest struct {
 	Name               string            `json:"name"`
 	Description        string            `json:"description"`
 	Instructions       string            `json:"instructions"`
+	SpecProfile        json.RawMessage   `json:"spec_profile"`
 	AvatarURL          *string           `json:"avatar_url"`
 	RuntimeID          string            `json:"runtime_id"`
 	RuntimeConfig      any               `json:"runtime_config"`
@@ -817,6 +857,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
+	specProfile := []byte("{}")
+	if rawSpecProfile, ok := rawFields["spec_profile"]; ok {
+		specProfile, err = normalizeJSONObjectField(rawSpecProfile, "spec_profile")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,
@@ -830,6 +878,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            parseUUID(ownerID),
+		SpecProfile:        specProfile,
 		CustomEnv:          ce,
 		CustomArgs:         ca,
 		McpConfig:          mc,
@@ -880,6 +929,7 @@ type UpdateAgentRequest struct {
 	AvatarURL     *string `json:"avatar_url"`
 	RuntimeID     *string `json:"runtime_id"`
 	RuntimeConfig any     `json:"runtime_config"`
+	SpecProfile   any     `json:"spec_profile"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path is
 	// owner/admin-only, denies agent actors, and writes a persisted
@@ -1063,6 +1113,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomArgs != nil {
 		ca, _ := json.Marshal(*req.CustomArgs)
 		params.CustomArgs = ca
+	}
+	if rawSpecProfile, ok := rawFields["spec_profile"]; ok {
+		specProfile, err := normalizeJSONObjectField(rawSpecProfile, "spec_profile")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.SpecProfile = specProfile
 	}
 	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
