@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import {
   agentActivityKeys,
@@ -8,6 +8,7 @@ import {
 } from "../agents/queries";
 import {
   onIssueCreated,
+  onIssueCreatedFallback,
   onIssueDeleted,
   onIssueLabelsChanged,
   onIssueMetadataChanged,
@@ -259,6 +260,27 @@ describe("project progress invalidation", () => {
       project_id: PROJECT_ID,
     });
 
+    expectInvalidated(qc, projectKeys.list(WS_ID));
+  });
+});
+
+describe("onIssueCreatedFallback", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("invalidates issue and project caches when the created event omits the full issue", () => {
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache(baseIssue));
+    qc.setQueryData(projectKeys.list(WS_ID), []);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    onIssueCreatedFallback(qc, WS_ID);
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: issueKeys.all(WS_ID) });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectKeys.all(WS_ID) });
+    expectInvalidated(qc, issueKeys.list(WS_ID));
     expectInvalidated(qc, projectKeys.list(WS_ID));
   });
 });

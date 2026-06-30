@@ -25,6 +25,7 @@ import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
 import {
   onIssueCreated,
+  onIssueCreatedFallback,
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
@@ -598,10 +599,16 @@ export function useRealtimeSync(
     });
 
     const unsubIssueCreated = ws.on("issue:created", (p) => {
-      const { issue } = p as IssueCreatedPayload;
-      if (!issue) return;
+      const { issue, issue_id } = p as IssueCreatedPayload;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueCreated(qc, wsId, issue);
+      if (!wsId) return;
+      if (issue) {
+        onIssueCreated(qc, wsId, issue);
+        return;
+      }
+      if (issue_id) {
+        onIssueCreatedFallback(qc, wsId);
+      }
     });
 
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
