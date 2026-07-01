@@ -1,5 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { pickStageKeys } from "./task-status-pill";
+import {
+  isActiveTaskStatus,
+  pickStageKeys,
+  resolveEffectiveTaskStatus,
+} from "./task-status-pill";
+
+const patchApplyMessage = [
+  {
+    id: "msg-1",
+    task_id: "task-1",
+    issue_id: "issue-1",
+    seq: 1,
+    type: "tool_use" as const,
+    tool: "patch_apply",
+    created_at: "2026-07-01T10:01:40Z",
+  },
+];
 
 describe("pickStageKeys", () => {
   it("returns queued when status is queued and agent is online", () => {
@@ -36,5 +52,37 @@ describe("pickStageKeys", () => {
 
   it("returns thinking for running with no messages", () => {
     expect(pickStageKeys("running", [], "online")).toEqual({ stageKey: "thinking" });
+  });
+
+  it("classifies only non-terminal task statuses as active", () => {
+    expect(isActiveTaskStatus("queued")).toBe(true);
+    expect(isActiveTaskStatus("dispatched")).toBe(true);
+    expect(isActiveTaskStatus("waiting_local_directory")).toBe(true);
+    expect(isActiveTaskStatus("running")).toBe(true);
+    expect(isActiveTaskStatus("failed")).toBe(false);
+    expect(isActiveTaskStatus("completed")).toBe(false);
+    expect(isActiveTaskStatus("cancelled")).toBe(false);
+    expect(isActiveTaskStatus(undefined)).toBe(false);
+  });
+
+  it("upgrades pre-running active statuses when streamed messages arrive", () => {
+    expect(resolveEffectiveTaskStatus("queued", patchApplyMessage)).toBe(
+      "running",
+    );
+    expect(resolveEffectiveTaskStatus("dispatched", patchApplyMessage)).toBe(
+      "running",
+    );
+  });
+
+  it("does not let stale streamed tool messages override terminal task status", () => {
+    expect(resolveEffectiveTaskStatus("failed", patchApplyMessage)).toBe(
+      "failed",
+    );
+    expect(resolveEffectiveTaskStatus("completed", patchApplyMessage)).toBe(
+      "completed",
+    );
+    expect(resolveEffectiveTaskStatus("cancelled", patchApplyMessage)).toBe(
+      "cancelled",
+    );
   });
 });

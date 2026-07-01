@@ -28,7 +28,7 @@ import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/c
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
-import { TaskStatusPill } from "./task-status-pill";
+import { isActiveTaskStatus, TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { useT } from "../../i18n";
@@ -70,6 +70,7 @@ export function ChatMessageList({
   const { t } = useT("chat");
 
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const pendingTaskIsActive = isActiveTaskStatus(pendingTask?.status);
 
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
@@ -81,15 +82,23 @@ export function ChatMessageList({
 
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
-  const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
-  const canFetchLiveTimeline = isTaskMessageTaskId(pendingTaskId) && !pendingAlreadyPersisted;
+  const showLiveTimeline =
+    !!pendingTaskId && pendingTaskIsActive && !pendingAlreadyPersisted;
+  const canFetchLiveTimeline =
+    isTaskMessageTaskId(pendingTaskId) &&
+    pendingTaskIsActive &&
+    !pendingAlreadyPersisted;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: canFetchLiveTimeline,
   });
   const liveTimeline: ChatTimelineItem[] = buildTimeline(liveTaskMessages ?? []);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
-  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
+  const showStatusPill =
+    !!pendingTaskId &&
+    pendingTaskIsActive &&
+    !pendingAlreadyPersisted &&
+    !!pendingTask;
 
   const totalCount = messages.length + (hasLive || showStatusPill ? 1 : 0);
   const firstIndex = totalCount > 0 ? firstItemIndex : 0;
