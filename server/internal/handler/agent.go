@@ -266,6 +266,7 @@ type AgentTaskResponse struct {
 	AgentID     string `json:"agent_id"`
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
+	IssueNumber int32  `json:"issue_number,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief

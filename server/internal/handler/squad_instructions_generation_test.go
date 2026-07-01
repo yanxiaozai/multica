@@ -3,23 +3,56 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func requestAsWorkspaceRole(req *http.Request, role string) *http.Request {
+	return requestAsWorkspaceUserRole(req, testUserID, role)
+}
+
+func requestAsWorkspaceUserRole(req *http.Request, userID, role string) *http.Request {
 	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{
 		WorkspaceID: util.MustParseUUID(testWorkspaceID),
-		UserID:      util.MustParseUUID(testUserID),
+		UserID:      util.MustParseUUID(userID),
 		Role:        role,
 	}))
+}
+
+func createSquadGenerationTestMember(t *testing.T, role string) string {
+	t.Helper()
+	ctx := context.Background()
+	email := fmt.Sprintf("squad-generation-%s@multica.test", uuid.NewString())
+
+	var userID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Squad Generation Member', $1)
+		RETURNING id
+	`, email).Scan(&userID); err != nil {
+		t.Fatalf("create squad generation member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, $3)
+	`, testWorkspaceID, userID, role); err != nil {
+		t.Fatalf("create squad generation member: %v", err)
+	}
+
+	return userID
 }
 
 func withSquadGenerationJobParams(req *http.Request, squadID, jobID string) *http.Request {
@@ -73,8 +106,15 @@ func TestSquadInstructionsGenerationCreateQueuesTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load queued task: %v", err)
 	}
-	if !strings.Contains(string(task.Context), `"type":"squad_instructions_generation"`) ||
-		!strings.Contains(string(task.Context), "member document for generation") {
+	var taskContext struct {
+		Type   string `json:"type"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(task.Context, &taskContext); err != nil {
+		t.Fatalf("decode task context: %v", err)
+	}
+	if taskContext.Type != "squad_instructions_generation" ||
+		!strings.Contains(taskContext.Prompt, "member document for generation") {
 		t.Fatalf("task context missing generation prompt: %s", string(task.Context))
 	}
 }
@@ -96,12 +136,12 @@ func TestSquadInstructionsGenerationRejectsInvalidMode(t *testing.T) {
 	}
 }
 
-func TestSquadInstructionsGenerationRejectsLeaderWithoutRuntime(t *testing.T) {
+func TestSquadInstructionsGenerationRejectsArchivedLeader(t *testing.T) {
 	leaderID := createHandlerTestAgent(t, "Generation No Runtime Leader", []byte("[]"))
-	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET runtime_id = NULL WHERE id = $1`, leaderID); err != nil {
-		t.Fatalf("clear runtime: %v", err)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET archived_at = now() WHERE id = $1`, leaderID); err != nil {
+		t.Fatalf("archive leader: %v", err)
 	}
-	squad := seedSquadForBriefing(t, leaderID, "AI Generation No Runtime Squad", "")
+	squad := seedSquadForBriefing(t, leaderID, "AI Generation Archived Leader Squad", "")
 
 	req := newRequest(http.MethodPost, "/api/squads/"+util.UUIDToString(squad.ID)+"/instructions/generation-jobs", map[string]any{
 		"mode": "agent_docs",
@@ -111,8 +151,8 @@ func TestSquadInstructionsGenerationRejectsLeaderWithoutRuntime(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	testHandler.CreateSquadInstructionsGenerationJob(w, req)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "leader agent has no runtime") {
-		t.Fatalf("status/body = %d/%s, want no-runtime 400", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "leader agent is archived") {
+		t.Fatalf("status/body = %d/%s, want archived-leader 400", w.Code, w.Body.String())
 	}
 }
 
@@ -124,7 +164,12 @@ func TestSquadInstructionsGenerationCreateRequiresOwnerOrAdmin(t *testing.T) {
 		"mode": "agent_docs",
 	})
 	req = withURLParam(req, "id", util.UUIDToString(squad.ID))
-	req = requestAsWorkspaceRole(req, "member")
+	memberID := createSquadGenerationTestMember(t, "member")
+	req = newRequestAs(memberID, http.MethodPost, "/api/squads/"+util.UUIDToString(squad.ID)+"/instructions/generation-jobs", map[string]any{
+		"mode": "agent_docs",
+	})
+	req = withURLParam(req, "id", util.UUIDToString(squad.ID))
+	req = requestAsWorkspaceUserRole(req, memberID, "member")
 
 	w := httptest.NewRecorder()
 	testHandler.CreateSquadInstructionsGenerationJob(w, req)

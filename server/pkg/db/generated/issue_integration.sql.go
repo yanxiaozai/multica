@@ -245,6 +245,37 @@ func (q *Queries) GetIssueBridgeItemByRemote(ctx context.Context, arg GetIssueBr
 	return i, err
 }
 
+const getIssueBridgeItemByIssue = `-- name: GetIssueBridgeItemByIssue :one
+SELECT id, workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url, remote_updated_at, created_at, updated_at FROM issue_bridge_item
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY updated_at DESC, created_at DESC
+LIMIT 1
+`
+
+type GetIssueBridgeItemByIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Loads the external GitLab issue mapping for a Multica issue when present.
+func (q *Queries) GetIssueBridgeItemByIssue(ctx context.Context, arg GetIssueBridgeItemByIssueParams) (IssueBridgeItem, error) {
+	row := q.db.QueryRow(ctx, getIssueBridgeItemByIssue, arg.WorkspaceID, arg.IssueID)
+	var i IssueBridgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.IntegrationID,
+		&i.RemoteProjectRef,
+		&i.RemoteIid,
+		&i.RemoteUrl,
+		&i.RemoteUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueIntegrationByProviderName = `-- name: GetIssueIntegrationByProviderName :one
 SELECT id, workspace_id, provider, name, base_url, encrypted_token, default_issue_skill_id, polling_enabled, default_poll_interval_seconds, config, created_at, updated_at FROM issue_integration
 WHERE workspace_id = $1 AND provider = $2 AND name = $3

@@ -117,7 +117,9 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 // encodes Bohan's rule (MUL-2170): a member comment that explicitly @mentions
 // anyone — agent, member, squad, or @all — must NOT wake the squad leader.
 // Issue cross-references are not routing and do not suppress the leader.
-// Agent-authored comments are exempt: the leader still coordinates threads.
+// Agent-authored comments follow the same rule when they explicitly route to
+// someone else; the mention path owns that handoff and the leader must not be
+// double-enqueued.
 func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -190,12 +192,12 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			description: "@squad routes the issue to that squad's leader — current leader stays out",
 		},
 		{
-			name:        "agent comment with @agent still triggers leader",
+			name:        "agent comment with @agent skips leader",
 			content:     "delegating to [@Other](mention://agent/" + fx.OtherID + ")",
 			authorType:  "agent",
 			authorID:    fx.OtherID,
-			want:        true,
-			description: "agent-authored replies always reach leader so it can coordinate next step",
+			want:        false,
+			description: "explicit agent-authored handoff is owned by the mention path; leader must not double-enqueue",
 		},
 	}
 
@@ -207,6 +209,74 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 					tc.description, tc.content, tc.authorType, tc.authorID, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCreateComment_AgentMentionHandoffSkipsSquadLeader drives the production
+// comment path for the common squad workflow: one worker posts a completion
+// comment that explicitly @mentions the next worker. The mentioned worker must
+// receive a task, but the squad leader must not also wake up just to repeat the
+// same handoff.
+func TestCreateComment_AgentMentionHandoffSkipsSquadLeader(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.OtherID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+	var workerTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+		VALUES ($1, $2, $3, 'running', FALSE)
+		RETURNING id
+	`, fx.OtherID, runtimeID, issueID).Scan(&workerTaskID); err != nil {
+		t.Fatalf("seed worker task: %v", err)
+	}
+
+	targetID := createHandlerTestAgent(t, "Squad Handoff Target", nil)
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "已完成本轮检查，交 [@Target](mention://agent/" + targetID + ") 进入下一步。",
+	})
+	r.Header.Set("X-Agent-ID", fx.OtherID)
+	r.Header.Set("X-Task-ID", workerTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaderTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if leaderTasks != 0 {
+		t.Fatalf("after explicit agent handoff: expected 0 queued leader tasks, got %d", leaderTasks)
+	}
+
+	var targetTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, targetID).Scan(&targetTasks); err != nil {
+		t.Fatalf("count target tasks: %v", err)
+	}
+	if targetTasks != 1 {
+		t.Fatalf("after explicit agent handoff: expected 1 queued target task, got %d", targetTasks)
 	}
 }
 

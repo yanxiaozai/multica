@@ -3435,8 +3435,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
+	issueSpecRef := task.IssueID
+	if task.IssueNumber > 0 {
+		issueSpecRef = strconv.Itoa(int(task.IssueNumber))
+	}
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                           task.IssueID,
+		IssueSpecRef:                      issueSpecRef,
 		TriggerCommentID:                  task.TriggerCommentID,
 		TriggerThreadID:                   task.TriggerThreadID,
 		NewCommentCount:                   task.NewCommentCount,

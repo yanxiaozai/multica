@@ -18,7 +18,10 @@ const (
 	defaultAuditMode = "required"
 )
 
-var validSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var (
+	validSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	hashIssueRef = regexp.MustCompile(`^#([0-9]+)$`)
+)
 
 var moduleDocFiles = map[string]string{
 	"requirements":   "requirements.md",
@@ -101,6 +104,30 @@ type AppendOptions struct {
 	Now     time.Time
 }
 
+type WorkflowOptions struct {
+	Issue          string
+	CommentID      string
+	Intent         string
+	Status         string
+	TriggerComment string
+	ParentWorkflow string
+	Owner          string
+	Stage          string
+	LastResult     string
+	NextAction     string
+	Now            time.Time
+}
+
+type ResumeWorkflowOptions struct {
+	Issue       string
+	FromComment string
+	Trigger     string
+	Owner       string
+	Stage       string
+	NextAction  string
+	Now         time.Time
+}
+
 type AuditState struct {
 	Mode       string `json:"mode" yaml:"mode"`
 	Skipped    bool   `json:"skipped" yaml:"skipped"`
@@ -109,21 +136,43 @@ type AuditState struct {
 	SkippedAt  string `json:"skipped_at,omitempty" yaml:"skipped_at,omitempty"`
 }
 
+type CurrentWorkflow struct {
+	ActiveThread string `json:"active_thread,omitempty" yaml:"active_thread,omitempty"`
+	Owner        string `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Stage        string `json:"stage,omitempty" yaml:"stage,omitempty"`
+	ResumeTarget string `json:"resume_target,omitempty" yaml:"resume_target,omitempty"`
+}
+
+type CommentWorkflow struct {
+	CommentID      string `json:"comment_id" yaml:"comment_id"`
+	Intent         string `json:"intent" yaml:"intent"`
+	Status         string `json:"status" yaml:"status"`
+	TriggerComment string `json:"trigger_comment,omitempty" yaml:"trigger_comment,omitempty"`
+	ParentWorkflow string `json:"parent_workflow,omitempty" yaml:"parent_workflow,omitempty"`
+	Owner          string `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Stage          string `json:"stage,omitempty" yaml:"stage,omitempty"`
+	LastResult     string `json:"last_result,omitempty" yaml:"last_result,omitempty"`
+	NextAction     string `json:"next_action,omitempty" yaml:"next_action,omitempty"`
+	UpdatedAt      string `json:"updated_at" yaml:"updated_at"`
+}
+
 type IssueState struct {
-	Issue         string     `json:"issue" yaml:"issue"`
-	Title         string     `json:"title,omitempty" yaml:"title,omitempty"`
-	Primary       string     `json:"primary,omitempty" yaml:"primary,omitempty"`
-	Related       []string   `json:"related,omitempty" yaml:"related,omitempty"`
-	Status        string     `json:"status" yaml:"status"`
-	Owner         string     `json:"owner,omitempty" yaml:"owner,omitempty"`
-	CurrentStage  string     `json:"current_stage" yaml:"current_stage"`
-	CurrentLoop   string     `json:"current_loop,omitempty" yaml:"current_loop,omitempty"`
-	LastResult    string     `json:"last_result,omitempty" yaml:"last_result,omitempty"`
-	OpenQuestions []string   `json:"open_questions,omitempty" yaml:"open_questions,omitempty"`
-	Blockers      []string   `json:"blockers,omitempty" yaml:"blockers,omitempty"`
-	NextHandoff   string     `json:"next_handoff,omitempty" yaml:"next_handoff,omitempty"`
-	Audit         AuditState `json:"audit" yaml:"audit"`
-	UpdatedAt     string     `json:"updated_at" yaml:"updated_at"`
+	Issue            string            `json:"issue" yaml:"issue"`
+	Title            string            `json:"title,omitempty" yaml:"title,omitempty"`
+	Primary          string            `json:"primary,omitempty" yaml:"primary,omitempty"`
+	Related          []string          `json:"related,omitempty" yaml:"related,omitempty"`
+	Status           string            `json:"status" yaml:"status"`
+	Owner            string            `json:"owner,omitempty" yaml:"owner,omitempty"`
+	CurrentStage     string            `json:"current_stage" yaml:"current_stage"`
+	CurrentLoop      string            `json:"current_loop,omitempty" yaml:"current_loop,omitempty"`
+	LastResult       string            `json:"last_result,omitempty" yaml:"last_result,omitempty"`
+	OpenQuestions    []string          `json:"open_questions,omitempty" yaml:"open_questions,omitempty"`
+	Blockers         []string          `json:"blockers,omitempty" yaml:"blockers,omitempty"`
+	NextHandoff      string            `json:"next_handoff,omitempty" yaml:"next_handoff,omitempty"`
+	CurrentWorkflow  CurrentWorkflow   `json:"current_workflow,omitempty" yaml:"current_workflow,omitempty"`
+	CommentWorkflows []CommentWorkflow `json:"comment_workflows,omitempty" yaml:"comment_workflows,omitempty"`
+	Audit            AuditState        `json:"audit" yaml:"audit"`
+	UpdatedAt        string            `json:"updated_at" yaml:"updated_at"`
 }
 
 type Status struct {
@@ -208,10 +257,11 @@ func Init(root string, opts InitOptions) error {
 		}
 	}
 	if opts.Issue != "" {
-		state := defaultIssueState(opts.Issue, now)
+		issue := canonicalIssueRef(opts.Issue)
+		state := defaultIssueState(issue, now)
 		state.Title = strings.TrimSpace(opts.Title)
 		state.Primary = primaryFromScope(opts.Epic, opts.Module)
-		if err := writeFileIfAllowed(issuePath(root, opts.Issue), issueStateTemplate(state), opts.Force); err != nil {
+		if err := writeFileIfAllowed(issuePath(root, issue), issueStateTemplate(state), opts.Force); err != nil {
 			return err
 		}
 	}
@@ -234,14 +284,15 @@ func GetStatus(root string, opts StatusOptions) (Status, error) {
 		st.Missing = append(st.Missing, filepath.Join(DirName, "index.md"))
 	}
 	if opts.Issue != "" {
-		st.Issue = opts.Issue
-		path := issuePath(root, opts.Issue)
+		issue := canonicalIssueRef(opts.Issue)
+		st.Issue = issue
+		path := issuePath(root, issue)
 		st.Paths["issue"] = path
 		st.IssueStateExists = fileExists(path)
 		if !st.IssueStateExists {
-			st.Missing = append(st.Missing, filepath.Join(DirName, "issues", opts.Issue+".md"))
+			st.Missing = append(st.Missing, filepath.Join(DirName, "issues", issue+".md"))
 		} else {
-			state, _, err := readIssueState(path, opts.Issue)
+			state, _, err := readIssueState(path, issue)
 			if err != nil {
 				st.Warnings = append(st.Warnings, err.Error())
 			} else {
@@ -447,6 +498,142 @@ func AppendHandoff(root string, opts HandoffOptions) error {
 	return writeIssueState(path, state, strings.TrimRight(body, "\n")+entry+"\n")
 }
 
+func ListWorkflows(root, issue string) ([]CommentWorkflow, CurrentWorkflow, error) {
+	if strings.TrimSpace(issue) == "" {
+		return nil, CurrentWorkflow{}, fmt.Errorf("issue is required")
+	}
+	state, _, err := readIssueState(issuePath(root, issue), issue)
+	if err != nil {
+		return nil, CurrentWorkflow{}, err
+	}
+	return append([]CommentWorkflow(nil), state.CommentWorkflows...), state.CurrentWorkflow, nil
+}
+
+func GetWorkflow(root, issue, commentID string) (CommentWorkflow, error) {
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return CommentWorkflow{}, fmt.Errorf("comment is required")
+	}
+	workflows, _, err := ListWorkflows(root, issue)
+	if err != nil {
+		return CommentWorkflow{}, err
+	}
+	for _, wf := range workflows {
+		if wf.CommentID == commentID {
+			return wf, nil
+		}
+	}
+	return CommentWorkflow{}, fmt.Errorf("workflow %q not found", commentID)
+}
+
+func StartWorkflow(root string, opts WorkflowOptions) (CommentWorkflow, error) {
+	if err := validateWorkflowOptions(opts, true); err != nil {
+		return CommentWorkflow{}, err
+	}
+	now := normalizeNow(opts.Now)
+	if err := Init(root, InitOptions{Issue: opts.Issue, Now: now}); err != nil {
+		return CommentWorkflow{}, err
+	}
+	path := issuePath(root, opts.Issue)
+	state, body, err := readIssueState(path, opts.Issue)
+	if err != nil {
+		return CommentWorkflow{}, err
+	}
+	entry := CommentWorkflow{
+		CommentID:      strings.TrimSpace(opts.CommentID),
+		Intent:         defaultWorkflowIntent(opts.Intent),
+		Status:         defaultWorkflowStatus(opts.Status),
+		TriggerComment: defaultString(opts.TriggerComment, opts.CommentID),
+		ParentWorkflow: strings.TrimSpace(opts.ParentWorkflow),
+		Owner:          strings.TrimSpace(opts.Owner),
+		Stage:          strings.TrimSpace(opts.Stage),
+		LastResult:     strings.TrimSpace(opts.LastResult),
+		NextAction:     strings.TrimSpace(opts.NextAction),
+		UpdatedAt:      now.Format(time.RFC3339),
+	}
+	state.CommentWorkflows = upsertWorkflow(state.CommentWorkflows, entry)
+	state.CurrentWorkflow = CurrentWorkflow{
+		ActiveThread: entry.CommentID,
+		Owner:        entry.Owner,
+		Stage:        entry.Stage,
+		ResumeTarget: entry.ParentWorkflow,
+	}
+	state.UpdatedAt = entry.UpdatedAt
+	if err := writeIssueState(path, state, renderWorkflowSections(body, state)); err != nil {
+		return CommentWorkflow{}, err
+	}
+	return entry, nil
+}
+
+func UpdateWorkflow(root string, opts WorkflowOptions) (CommentWorkflow, error) {
+	if err := validateWorkflowOptions(opts, false); err != nil {
+		return CommentWorkflow{}, err
+	}
+	if strings.TrimSpace(opts.Issue) == "" {
+		return CommentWorkflow{}, fmt.Errorf("issue is required")
+	}
+	commentID := strings.TrimSpace(opts.CommentID)
+	if commentID == "" {
+		return CommentWorkflow{}, fmt.Errorf("comment is required")
+	}
+	path := issuePath(root, opts.Issue)
+	state, body, err := readIssueState(path, opts.Issue)
+	if err != nil {
+		return CommentWorkflow{}, err
+	}
+	idx := workflowIndex(state.CommentWorkflows, commentID)
+	if idx < 0 {
+		return CommentWorkflow{}, fmt.Errorf("workflow %q not found", commentID)
+	}
+	now := normalizeNow(opts.Now)
+	entry := state.CommentWorkflows[idx]
+	applyWorkflowOptions(&entry, opts)
+	entry.UpdatedAt = now.Format(time.RFC3339)
+	state.CommentWorkflows[idx] = entry
+	if state.CurrentWorkflow.ActiveThread == commentID {
+		if entry.Owner != "" {
+			state.CurrentWorkflow.Owner = entry.Owner
+		}
+		if entry.Stage != "" {
+			state.CurrentWorkflow.Stage = entry.Stage
+		}
+		if entry.ParentWorkflow != "" {
+			state.CurrentWorkflow.ResumeTarget = entry.ParentWorkflow
+		}
+	}
+	state.UpdatedAt = entry.UpdatedAt
+	if err := writeIssueState(path, state, renderWorkflowSections(body, state)); err != nil {
+		return CommentWorkflow{}, err
+	}
+	return entry, nil
+}
+
+func ResumeWorkflow(root string, opts ResumeWorkflowOptions) (CommentWorkflow, error) {
+	if strings.TrimSpace(opts.FromComment) == "" {
+		return CommentWorkflow{}, fmt.Errorf("--from is required")
+	}
+	if strings.TrimSpace(opts.Trigger) == "" {
+		return CommentWorkflow{}, fmt.Errorf("--trigger is required")
+	}
+	from, err := GetWorkflow(root, opts.Issue, opts.FromComment)
+	if err != nil {
+		return CommentWorkflow{}, err
+	}
+	return StartWorkflow(root, WorkflowOptions{
+		Issue:          opts.Issue,
+		CommentID:      opts.Trigger,
+		Intent:         "resume",
+		Status:         "active",
+		TriggerComment: opts.Trigger,
+		ParentWorkflow: from.CommentID,
+		Owner:          defaultString(opts.Owner, from.Owner),
+		Stage:          defaultString(opts.Stage, from.Stage),
+		LastResult:     from.LastResult,
+		NextAction:     defaultString(opts.NextAction, from.NextAction),
+		Now:            opts.Now,
+	})
+}
+
 func BindIssue(root string, opts BindIssueOptions) error {
 	if strings.TrimSpace(opts.Issue) == "" {
 		return fmt.Errorf("--issue is required")
@@ -502,10 +689,107 @@ func validateScope(epic, module, issue string) error {
 	if err := validateSegment("module", module); err != nil {
 		return err
 	}
-	if err := validateSegment("issue", issue); err != nil {
+	if err := validateSegment("issue", canonicalIssueRef(issue)); err != nil {
 		return err
 	}
 	return nil
+}
+
+func validateWorkflowOptions(opts WorkflowOptions, requireIntent bool) error {
+	if canonicalIssueRef(opts.Issue) == "" {
+		return fmt.Errorf("issue is required")
+	}
+	if strings.TrimSpace(opts.CommentID) == "" {
+		return fmt.Errorf("comment is required")
+	}
+	if requireIntent && strings.TrimSpace(opts.Intent) == "" {
+		return fmt.Errorf("intent is required")
+	}
+	if opts.Intent != "" && !validWorkflowIntent(opts.Intent) {
+		return fmt.Errorf("invalid intent %q", opts.Intent)
+	}
+	if opts.Status != "" && !validWorkflowStatus(opts.Status) {
+		return fmt.Errorf("invalid status %q", opts.Status)
+	}
+	return nil
+}
+
+func validWorkflowIntent(intent string) bool {
+	switch strings.TrimSpace(intent) {
+	case "new_request", "resume", "constraint", "question", "no_action":
+		return true
+	default:
+		return false
+	}
+}
+
+func validWorkflowStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "active", "interrupted", "completed", "superseded", "blocked":
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultWorkflowIntent(intent string) string {
+	intent = strings.TrimSpace(intent)
+	if intent == "" {
+		return "new_request"
+	}
+	return intent
+}
+
+func defaultWorkflowStatus(status string) string {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "active"
+	}
+	return status
+}
+
+func workflowIndex(workflows []CommentWorkflow, commentID string) int {
+	for i, wf := range workflows {
+		if wf.CommentID == commentID {
+			return i
+		}
+	}
+	return -1
+}
+
+func upsertWorkflow(workflows []CommentWorkflow, entry CommentWorkflow) []CommentWorkflow {
+	if idx := workflowIndex(workflows, entry.CommentID); idx >= 0 {
+		workflows[idx] = entry
+		return workflows
+	}
+	return append(workflows, entry)
+}
+
+func applyWorkflowOptions(entry *CommentWorkflow, opts WorkflowOptions) {
+	if opts.Intent != "" {
+		entry.Intent = opts.Intent
+	}
+	if opts.Status != "" {
+		entry.Status = opts.Status
+	}
+	if opts.TriggerComment != "" {
+		entry.TriggerComment = strings.TrimSpace(opts.TriggerComment)
+	}
+	if opts.ParentWorkflow != "" {
+		entry.ParentWorkflow = strings.TrimSpace(opts.ParentWorkflow)
+	}
+	if opts.Owner != "" {
+		entry.Owner = strings.TrimSpace(opts.Owner)
+	}
+	if opts.Stage != "" {
+		entry.Stage = strings.TrimSpace(opts.Stage)
+	}
+	if opts.LastResult != "" {
+		entry.LastResult = strings.TrimSpace(opts.LastResult)
+	}
+	if opts.NextAction != "" {
+		entry.NextAction = strings.TrimSpace(opts.NextAction)
+	}
 }
 
 func validateSegment(label, value string) error {
@@ -543,10 +827,11 @@ func modulePath(root, epic, module string) string {
 }
 
 func issuePath(root, issue string) string {
-	return filepath.Join(root, DirName, "issues", issue+".md")
+	return filepath.Join(root, DirName, "issues", canonicalIssueRef(issue)+".md")
 }
 
 func defaultIssueState(issue string, now time.Time) IssueState {
+	issue = canonicalIssueRef(issue)
 	return IssueState{
 		Issue:        issue,
 		Status:       "todo",
@@ -561,6 +846,7 @@ func defaultIssueState(issue string, now time.Time) IssueState {
 }
 
 func readIssueState(path, issue string) (IssueState, string, error) {
+	issue = canonicalIssueRef(issue)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return defaultIssueState(issue, time.Now()), "", fmt.Errorf("read issue state: %w", err)
@@ -581,13 +867,19 @@ func readIssueState(path, issue string) (IssueState, string, error) {
 			body = string(rest[bodyStart:])
 		}
 	}
-	if state.Issue == "" {
-		state.Issue = issue
-	}
+	state.Issue = issue
 	if state.Audit.Mode == "" {
 		state.Audit.Mode = defaultAuditMode
 	}
 	return state, body, nil
+}
+
+func canonicalIssueRef(issue string) string {
+	issue = strings.TrimSpace(issue)
+	if matches := hashIssueRef.FindStringSubmatch(issue); len(matches) == 2 {
+		return matches[1]
+	}
+	return issue
 }
 
 func writeIssueState(path string, state IssueState, body string) error {
@@ -645,6 +937,74 @@ func appendFile(b *strings.Builder, path, title string) {
 		b.WriteByte('\n')
 	}
 	b.WriteByte('\n')
+}
+
+func renderWorkflowSections(body string, state IssueState) string {
+	body = stripMarkdownSection(body, "Current Workflow")
+	body = stripMarkdownSection(body, "Comment Workflows")
+	body = strings.TrimRight(body, "\n")
+	if body != "" {
+		body += "\n\n"
+	}
+
+	var b strings.Builder
+	b.WriteString(body)
+	b.WriteString("## Current Workflow\n\n")
+	fmt.Fprintf(&b, "Active thread: %s\n", state.CurrentWorkflow.ActiveThread)
+	fmt.Fprintf(&b, "Owner: %s\n", state.CurrentWorkflow.Owner)
+	fmt.Fprintf(&b, "Stage: %s\n", state.CurrentWorkflow.Stage)
+	fmt.Fprintf(&b, "Resume target: %s\n\n", state.CurrentWorkflow.ResumeTarget)
+	b.WriteString("## Comment Workflows\n\n")
+	if len(state.CommentWorkflows) == 0 {
+		b.WriteString("### <trigger_comment_id>\n\n")
+		b.WriteString("Intent: new_request | resume | constraint | question | no_action\n")
+		b.WriteString("Status: active | interrupted | completed | superseded | blocked\n")
+		b.WriteString("Trigger comment: <trigger_comment_id>\n")
+		b.WriteString("Parent workflow:\n")
+		b.WriteString("Owner:\n")
+		b.WriteString("Stage:\n")
+		b.WriteString("Last result:\n")
+		b.WriteString("Next action:\n")
+		b.WriteString("Updated at:\n")
+		return b.String()
+	}
+	for _, wf := range state.CommentWorkflows {
+		fmt.Fprintf(&b, "### %s\n\n", wf.CommentID)
+		fmt.Fprintf(&b, "Intent: %s\n", wf.Intent)
+		fmt.Fprintf(&b, "Status: %s\n", wf.Status)
+		fmt.Fprintf(&b, "Trigger comment: %s\n", wf.TriggerComment)
+		fmt.Fprintf(&b, "Parent workflow: %s\n", wf.ParentWorkflow)
+		fmt.Fprintf(&b, "Owner: %s\n", wf.Owner)
+		fmt.Fprintf(&b, "Stage: %s\n", wf.Stage)
+		fmt.Fprintf(&b, "Last result: %s\n", wf.LastResult)
+		fmt.Fprintf(&b, "Next action: %s\n", wf.NextAction)
+		fmt.Fprintf(&b, "Updated at: %s\n\n", wf.UpdatedAt)
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func stripMarkdownSection(body, heading string) string {
+	lines := strings.Split(body, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "## "+heading {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return body
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "## ") {
+			end = i
+			break
+		}
+	}
+	out := append([]string{}, lines[:start]...)
+	out = append(out, lines[end:]...)
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
 }
 
 func ensureDir(path string) error {
@@ -714,6 +1074,14 @@ func defaultActor(actor string) string {
 		return "agent"
 	}
 	return actor
+}
+
+func defaultString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func primaryFromScope(epic, module string) string {
@@ -846,6 +1214,27 @@ Open fixes:
 
 ## Blockers
 
+## Current Workflow
+
+Active thread:
+Owner: %s
+Stage: %s
+Resume target:
+
+## Comment Workflows
+
+### <trigger_comment_id>
+
+Intent: new_request | resume | constraint | question | no_action
+Status: active | interrupted | completed | superseded | blocked
+Trigger comment: <trigger_comment_id>
+Parent workflow:
+Owner: %s
+Stage: %s
+Last result:
+Next action:
+Updated at: %s
+
 ## Next Handoff
 
 ## Audit
@@ -853,7 +1242,7 @@ Open fixes:
 Mode: %s
 Skipped: %t
 Reason: %s
-`, string(buf), state.Issue, issueTitleSuffix(state.Title), state.Primary, state.Status, state.Owner, state.CurrentStage, state.UpdatedAt, state.CurrentLoop, state.LastResult, state.Audit.Mode, state.Audit.Skipped, state.Audit.SkipReason)
+`, string(buf), state.Issue, issueTitleSuffix(state.Title), state.Primary, state.Status, state.Owner, state.CurrentStage, state.UpdatedAt, state.CurrentLoop, state.LastResult, state.Owner, state.CurrentStage, state.Owner, state.CurrentStage, state.UpdatedAt, state.Audit.Mode, state.Audit.Skipped, state.Audit.SkipReason)
 }
 
 func issueTitleSuffix(title string) string {

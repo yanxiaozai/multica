@@ -1164,6 +1164,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.validateCommentMentions(w, r, req.Content, issue.WorkspaceID) {
+		return
+	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
@@ -1297,6 +1300,54 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 }
 
+func (h *Handler) validateCommentMentions(w http.ResponseWriter, r *http.Request, content string, workspaceID pgtype.UUID) bool {
+	for _, mention := range util.ParseMentions(content) {
+		switch mention.Type {
+		case "agent":
+			id, err := util.ParseUUID(mention.ID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid agent mention")
+				return false
+			}
+			agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+				ID:          id,
+				WorkspaceID: workspaceID,
+			})
+			if err != nil || agent.ArchivedAt.Valid {
+				writeError(w, http.StatusBadRequest, "invalid agent mention")
+				return false
+			}
+		case "squad":
+			id, err := util.ParseUUID(mention.ID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid squad mention")
+				return false
+			}
+			if _, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+				ID:          id,
+				WorkspaceID: workspaceID,
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid squad mention")
+				return false
+			}
+		case "member":
+			id, err := util.ParseUUID(mention.ID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid member mention")
+				return false
+			}
+			if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+				UserID:      id,
+				WorkspaceID: workspaceID,
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid member mention")
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
 	if len(triggers) == 0 || len(suppressAgentIDs) == 0 {
 		return triggers
@@ -1408,7 +1459,7 @@ func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, 
 		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
 		return commentAgentTrigger{}, false
 	}
-	if authorType == "member" && commentMentionsAnyone(content) {
+	if commentMentionsAnyone(content) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -1730,6 +1781,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	suppressAgentIDs, ok := parseUUIDSliceOrBadRequest(w, req.SuppressAgentIDs, "suppress_agent_ids")
 	if !ok {
+		return
+	}
+	if !h.validateCommentMentions(w, r, req.Content, existing.WorkspaceID) {
 		return
 	}
 

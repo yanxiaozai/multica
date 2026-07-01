@@ -1387,6 +1387,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			resp.IssueNumber = issue.Number
+			if bridge, err := h.Queries.GetIssueBridgeItemByIssue(r.Context(), db.GetIssueBridgeItemByIssueParams{
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     issue.ID,
+			}); err == nil && bridge.RemoteIid > 0 && bridge.RemoteIid <= int64(^uint32(0)>>1) {
+				resp.IssueNumber = int32(bridge.RemoteIid)
+			}
 			resp.ThreadName = issue.Title
 
 			// Squad-leader briefing injection: when the issue is assigned

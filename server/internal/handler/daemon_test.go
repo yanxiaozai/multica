@@ -574,6 +574,73 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_PopulatesIssueNumber(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Issue number claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Issue number claim agent")
+
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET number = 17 WHERE id = $1`, issueID); err != nil {
+		t.Fatalf("setup: force local issue number: %v", err)
+	}
+	var integrationID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue_integration (
+			workspace_id, provider, name, base_url, encrypted_token, default_poll_interval_seconds
+		)
+		VALUES ($1, 'gitlab', 'issue-number-claim-gitlab', 'https://gitlab.example.com', 'sealed', 300)
+		RETURNING id
+	`, testWorkspaceID).Scan(&integrationID); err != nil {
+		t.Fatalf("setup: create issue integration: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue_integration WHERE id = $1`, integrationID) })
+	var bridgeItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue_bridge_item (
+			workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url
+		)
+		VALUES ($1, $2, $3, 'group/lms-mini', 59, 'https://gitlab.example.com/group/lms-mini/-/issues/59')
+		RETURNING id
+	`, testWorkspaceID, issueID, integrationID).Scan(&bridgeItemID); err != nil {
+		t.Fatalf("setup: create issue bridge item: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue_bridge_item WHERE id = $1`, bridgeItemID) })
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "issue-number-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var claimResp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &claimResp); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if claimResp.Task == nil {
+		t.Fatalf("missing task in response: %s", w.Body.String())
+	}
+	if claimResp.Task.IssueNumber != 59 {
+		t.Fatalf("issue_number = %d, want gitlab remote iid 59", claimResp.Task.IssueNumber)
+	}
+}
+
 // TestClaimTaskByRuntime_PopulatesWorkspaceContext verifies the claim
 // response carries workspace.context so the daemon can inject the
 // workspace-level system prompt into every agent brief. Regression coverage

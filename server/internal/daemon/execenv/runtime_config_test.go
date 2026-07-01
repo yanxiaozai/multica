@@ -162,6 +162,59 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 }
 
+func TestCommentTriggeredWorkflowRequiresCommentScopedSpecCheckpoint(t *testing.T) {
+	t.Parallel()
+	const (
+		issueID   = "55555555-6666-7777-8888-999999999999"
+		commentID = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+	)
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: commentID,
+	})
+
+	for _, want := range []string{
+		"Read Spec Memory for this issue",
+		"multica spec status --issue " + issueID + " --output json",
+		"multica spec workflow list " + issueID + " --output json",
+		"multica spec read --issue " + issueID + " --doc issue",
+		"classify the triggering comment intent",
+		"`new_request`, `resume`, `constraint`, `question`, or `no_action`",
+		"Latest comment intent wins",
+		"Only `resume` continues an interrupted checkpoint",
+		"`new_request` starts a new workflow anchored to triggering comment `" + commentID + "`",
+		"multica spec workflow start " + issueID + " --comment " + commentID + " --intent <intent>",
+		"multica spec workflow update " + issueID + " --comment " + commentID,
+		"multica spec workflow resume " + issueID + " --from <old_comment_id> --trigger " + commentID,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("comment-triggered brief missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestCommentTriggeredWorkflowUsesIssueSpecRef(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		IssueSpecRef:     "50",
+		TriggerCommentID: "comment-50",
+	})
+
+	for _, want := range []string{
+		"multica spec status --issue 50 --output json",
+		"multica spec workflow list 50 --output json",
+		"multica spec workflow start 50 --comment comment-50",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runtime config missing spec ref command %q\n---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "multica spec workflow list 55555555-6666-7777-8888-999999999999") {
+		t.Fatalf("runtime config used internal issue UUID for spec workflow\n---\n%s", out)
+	}
+}
+
 // The CLAUDE.md workflow surface must carry the same issue-wide since-delta
 // new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
 // stay in sync.

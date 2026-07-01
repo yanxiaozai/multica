@@ -70,10 +70,50 @@ var specIssueCmd = &cobra.Command{
 	Short: "Work with .spec issue mappings",
 }
 
+var specWorkflowCmd = &cobra.Command{
+	Use:   "workflow",
+	Short: "Work with comment-scoped .spec issue workflows",
+}
+
 var specIssueBindCmd = &cobra.Command{
 	Use:   "bind",
 	Short: "Create or update an issue-to-spec mapping",
 	RunE:  runSpecIssueBind,
+}
+
+var specWorkflowListCmd = &cobra.Command{
+	Use:   "list <issue-id>",
+	Short: "List comment-scoped workflows for an issue",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSpecWorkflowList,
+}
+
+var specWorkflowGetCmd = &cobra.Command{
+	Use:   "get <issue-id>",
+	Short: "Get a comment-scoped workflow",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSpecWorkflowGet,
+}
+
+var specWorkflowStartCmd = &cobra.Command{
+	Use:   "start <issue-id>",
+	Short: "Start or replace a comment-scoped workflow",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSpecWorkflowStart,
+}
+
+var specWorkflowUpdateCmd = &cobra.Command{
+	Use:   "update <issue-id>",
+	Short: "Update a comment-scoped workflow",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSpecWorkflowUpdate,
+}
+
+var specWorkflowResumeCmd = &cobra.Command{
+	Use:   "resume <issue-id>",
+	Short: "Resume an interrupted comment-scoped workflow",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSpecWorkflowResume,
 }
 
 type specSyncResponse struct {
@@ -98,9 +138,15 @@ func init() {
 	specCmd.AddCommand(specDecisionCmd)
 	specCmd.AddCommand(specStandardCmd)
 	specCmd.AddCommand(specIssueCmd)
+	specCmd.AddCommand(specWorkflowCmd)
 	specIssueCmd.AddCommand(specIssueBindCmd)
+	specWorkflowCmd.AddCommand(specWorkflowListCmd)
+	specWorkflowCmd.AddCommand(specWorkflowGetCmd)
+	specWorkflowCmd.AddCommand(specWorkflowStartCmd)
+	specWorkflowCmd.AddCommand(specWorkflowUpdateCmd)
+	specWorkflowCmd.AddCommand(specWorkflowResumeCmd)
 
-	for _, c := range []*cobra.Command{specInitCmd, specStatusCmd, specSyncCmd, specReadCmd, specUpdateCmd, specHandoffCmd, specDecisionCmd, specStandardCmd, specIssueBindCmd} {
+	for _, c := range []*cobra.Command{specInitCmd, specStatusCmd, specSyncCmd, specReadCmd, specUpdateCmd, specHandoffCmd, specDecisionCmd, specStandardCmd, specIssueBindCmd, specWorkflowListCmd, specWorkflowGetCmd, specWorkflowStartCmd, specWorkflowUpdateCmd, specWorkflowResumeCmd} {
 		c.Flags().String("root", "", "Project root (defaults to nearest ancestor with .git, AGENTS.md, CLAUDE.md, or pnpm-workspace.yaml)")
 	}
 	for _, c := range []*cobra.Command{specStatusCmd, specSyncCmd} {
@@ -159,6 +205,28 @@ func init() {
 	specIssueBindCmd.Flags().StringArray("related", nil, "Related spec mapping as <epic>/<module>:<reason> (repeatable)")
 	specIssueBindCmd.Flags().String("actor", "", "Actor name recorded with the mapping")
 	specIssueBindCmd.Flags().String("output", "table", "Output format: table or json")
+
+	for _, c := range []*cobra.Command{specWorkflowListCmd, specWorkflowGetCmd, specWorkflowStartCmd, specWorkflowUpdateCmd, specWorkflowResumeCmd} {
+		c.Flags().String("output", "table", "Output format: table or json")
+	}
+	for _, c := range []*cobra.Command{specWorkflowGetCmd, specWorkflowStartCmd, specWorkflowUpdateCmd} {
+		c.Flags().String("comment", "", "Trigger comment ID for this workflow")
+	}
+	for _, c := range []*cobra.Command{specWorkflowStartCmd, specWorkflowUpdateCmd} {
+		c.Flags().String("intent", "", "Workflow intent: new_request, resume, constraint, question, no_action")
+		c.Flags().String("status", "", "Workflow status: active, interrupted, completed, superseded, blocked")
+		c.Flags().String("owner", "", "Workflow owner")
+		c.Flags().String("stage", "", "Workflow stage")
+		c.Flags().String("last-result", "", "Compact last result")
+		c.Flags().String("next-action", "", "Compact next action")
+		c.Flags().String("parent-workflow", "", "Parent workflow comment ID")
+		c.Flags().String("trigger-comment", "", "Trigger comment ID to record")
+	}
+	specWorkflowResumeCmd.Flags().String("from", "", "Interrupted workflow comment ID to resume")
+	specWorkflowResumeCmd.Flags().String("trigger", "", "New trigger comment ID for the resume request")
+	specWorkflowResumeCmd.Flags().String("owner", "", "Workflow owner")
+	specWorkflowResumeCmd.Flags().String("stage", "", "Workflow stage")
+	specWorkflowResumeCmd.Flags().String("next-action", "", "Override inherited next action")
 }
 
 func runSpecInit(cmd *cobra.Command, _ []string) error {
@@ -455,6 +523,111 @@ func runSpecIssueBind(cmd *cobra.Command, _ []string) error {
 	return printSpecMutation(cmd, root, epic, module, issue, "issue bound")
 }
 
+func runSpecWorkflowList(cmd *cobra.Command, args []string) error {
+	root, err := specRoot(cmd)
+	if err != nil {
+		return err
+	}
+	workflows, current, err := specmem.ListWorkflows(root, args[0])
+	if err != nil {
+		return err
+	}
+	return printSpecWorkflows(cmd, current, workflows)
+}
+
+func runSpecWorkflowGet(cmd *cobra.Command, args []string) error {
+	root, err := specRoot(cmd)
+	if err != nil {
+		return err
+	}
+	commentID, _ := cmd.Flags().GetString("comment")
+	workflow, err := specmem.GetWorkflow(root, args[0], commentID)
+	if err != nil {
+		return err
+	}
+	return printSpecWorkflow(cmd, workflow)
+}
+
+func runSpecWorkflowStart(cmd *cobra.Command, args []string) error {
+	root, err := specRoot(cmd)
+	if err != nil {
+		return err
+	}
+	opts, err := specWorkflowOptionsFromFlags(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	workflow, err := specmem.StartWorkflow(root, opts)
+	if err != nil {
+		return err
+	}
+	return printSpecWorkflow(cmd, workflow)
+}
+
+func runSpecWorkflowUpdate(cmd *cobra.Command, args []string) error {
+	root, err := specRoot(cmd)
+	if err != nil {
+		return err
+	}
+	opts, err := specWorkflowOptionsFromFlags(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	workflow, err := specmem.UpdateWorkflow(root, opts)
+	if err != nil {
+		return err
+	}
+	return printSpecWorkflow(cmd, workflow)
+}
+
+func runSpecWorkflowResume(cmd *cobra.Command, args []string) error {
+	root, err := specRoot(cmd)
+	if err != nil {
+		return err
+	}
+	from, _ := cmd.Flags().GetString("from")
+	trigger, _ := cmd.Flags().GetString("trigger")
+	owner, _ := cmd.Flags().GetString("owner")
+	stage, _ := cmd.Flags().GetString("stage")
+	nextAction, _ := cmd.Flags().GetString("next-action")
+	workflow, err := specmem.ResumeWorkflow(root, specmem.ResumeWorkflowOptions{
+		Issue:       args[0],
+		FromComment: from,
+		Trigger:     trigger,
+		Owner:       owner,
+		Stage:       stage,
+		NextAction:  nextAction,
+	})
+	if err != nil {
+		return err
+	}
+	return printSpecWorkflow(cmd, workflow)
+}
+
+func specWorkflowOptionsFromFlags(cmd *cobra.Command, issue string) (specmem.WorkflowOptions, error) {
+	commentID, _ := cmd.Flags().GetString("comment")
+	intent, _ := cmd.Flags().GetString("intent")
+	status, _ := cmd.Flags().GetString("status")
+	owner, _ := cmd.Flags().GetString("owner")
+	stage, _ := cmd.Flags().GetString("stage")
+	lastResult, _ := cmd.Flags().GetString("last-result")
+	nextAction, _ := cmd.Flags().GetString("next-action")
+	parentWorkflow, _ := cmd.Flags().GetString("parent-workflow")
+	triggerComment, _ := cmd.Flags().GetString("trigger-comment")
+	return specmem.WorkflowOptions{
+		Issue:          issue,
+		CommentID:      commentID,
+		Intent:         intent,
+		Status:         status,
+		Owner:          owner,
+		Stage:          stage,
+		LastResult:     lastResult,
+		NextAction:     nextAction,
+		ParentWorkflow: parentWorkflow,
+		TriggerComment: triggerComment,
+	}, nil
+}
+
 func splitSpecPrimary(primary string) (string, string) {
 	parts := strings.Split(primary, "/")
 	if len(parts) != 2 {
@@ -542,6 +715,42 @@ func printSpecFileWriteResult(cmd *cobra.Command, result specmem.FileWriteSummar
 		{"skipped_existing", fmt.Sprint(len(result.SkippedExisting))},
 	}
 	cli.PrintTable(os.Stdout, []string{"FIELD", "VALUE"}, rows)
+	return nil
+}
+
+func printSpecWorkflow(cmd *cobra.Command, workflow specmem.CommentWorkflow) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, workflow)
+	}
+	rows := [][]string{
+		{"comment", workflow.CommentID},
+		{"intent", workflow.Intent},
+		{"status", workflow.Status},
+		{"owner", workflow.Owner},
+		{"stage", workflow.Stage},
+		{"parent", workflow.ParentWorkflow},
+		{"next_action", workflow.NextAction},
+		{"updated", workflow.UpdatedAt},
+	}
+	cli.PrintTable(os.Stdout, []string{"FIELD", "VALUE"}, rows)
+	return nil
+}
+
+func printSpecWorkflows(cmd *cobra.Command, current specmem.CurrentWorkflow, workflows []specmem.CommentWorkflow) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"current":   current,
+			"workflows": workflows,
+		})
+	}
+	rows := make([][]string, 0, len(workflows)+1)
+	rows = append(rows, []string{"current", current.ActiveThread, "", current.Owner, current.Stage, current.ResumeTarget})
+	for _, wf := range workflows {
+		rows = append(rows, []string{wf.CommentID, wf.Intent, wf.Status, wf.Owner, wf.Stage, wf.NextAction})
+	}
+	cli.PrintTable(os.Stdout, []string{"COMMENT", "INTENT", "STATUS", "OWNER", "STAGE", "NEXT"}, rows)
 	return nil
 }
 

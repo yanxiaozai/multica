@@ -98,6 +98,13 @@ WHERE workspace_id = $1 AND scope_type = $2 AND scope_id = $3;
 SELECT * FROM issue_bridge_item
 WHERE integration_id = $1 AND remote_iid = $2;
 
+-- name: GetIssueBridgeItemByIssue :one
+-- Loads the external GitLab issue mapping for a Multica issue when present.
+SELECT * FROM issue_bridge_item
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY updated_at DESC, created_at DESC
+LIMIT 1;
+
 -- name: CreateIssueBridgeItem :one
 INSERT INTO issue_bridge_item (
     workspace_id, issue_id, integration_id,

@@ -312,6 +312,29 @@ func TestSlimCommentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
 	}
 }
 
+func TestSlimSquadInstructionsGenerationOmitsRepoAndSkillLists(t *testing.T) {
+	withSlimBrief(t)
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		SquadInstructionsGenerationPrompt: "Summarize agent docs.",
+		AgentName:                         "Eve",
+		AgentID:                           "eve-1",
+		Repos:                             []RepoContextForEnv{{URL: "https://example.com/x.git", Description: "x"}},
+		AgentSkills:                       []SkillContextForEnv{{Name: "skill-x", Description: "x"}},
+	})
+
+	for _, bad := range []string{
+		"## Repositories",
+		"## Skills",
+		"https://example.com/x.git",
+		"skill-x",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("slim squad-instructions brief should omit %q\n---\n%s", bad, out)
+		}
+	}
+}
+
 // TestSlimQuickCreateAvailableCommands locks the minimal-variant content
 // for quick-create's Available Commands: `issue create` present, every
 // other Core command absent (the hard guardrails forbid the call).

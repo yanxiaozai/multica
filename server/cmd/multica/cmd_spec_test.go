@@ -115,7 +115,7 @@ func TestSpecSyncToFilesWritesSnapshot(t *testing.T) {
 						}]
 					}],
 					"issues": [{
-						"issue": "ISS-1",
+						"issue": "#50",
 						"title": "Issue",
 						"primary": "scheduling/appointment",
 						"status": "todo",
@@ -144,8 +144,11 @@ func TestSpecSyncToFilesWritesSnapshot(t *testing.T) {
 	}
 	assertCmdSpecFile(t, root, ".spec/epics/scheduling/00-index.md", "# Scheduling\n")
 	assertCmdSpecFile(t, root, ".spec/epics/scheduling/appointment/requirements.md", "# Requirements\n")
-	if _, err := os.Stat(filepath.Join(root, ".spec/issues/ISS-1.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".spec/issues/50.md")); err != nil {
 		t.Fatalf("issue file not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".spec/issues/#50.md")); !os.IsNotExist(err) {
+		t.Fatalf("raw issue ref file should not be written, err=%v", err)
 	}
 }
 
@@ -176,6 +179,81 @@ func TestSpecSyncToFilesDoesNotOverwriteWithoutForce(t *testing.T) {
 		t.Fatalf("runSpecSync() error = %v", err)
 	}
 	assertCmdSpecFile(t, root, ".spec/epics/scheduling/appointment/requirements.md", "local edits")
+}
+
+func TestSpecWorkflowCommandsWriteIssueState(t *testing.T) {
+	root := t.TempDir()
+
+	start := newSpecWorkflowTestCommand(root, "start")
+	mustSetFlag(t, start, "comment", "comment-a")
+	mustSetFlag(t, start, "intent", "new_request")
+	mustSetFlag(t, start, "status", "active")
+	mustSetFlag(t, start, "owner", "mini")
+	mustSetFlag(t, start, "stage", "implementing")
+	mustSetFlag(t, start, "next-action", "patch booking page")
+	if err := runSpecWorkflowStart(start, []string{"ISS-1"}); err != nil {
+		t.Fatalf("runSpecWorkflowStart() error = %v", err)
+	}
+
+	update := newSpecWorkflowTestCommand(root, "update")
+	mustSetFlag(t, update, "comment", "comment-a")
+	mustSetFlag(t, update, "status", "interrupted")
+	mustSetFlag(t, update, "stage", "testing")
+	if err := runSpecWorkflowUpdate(update, []string{"ISS-1"}); err != nil {
+		t.Fatalf("runSpecWorkflowUpdate() error = %v", err)
+	}
+
+	resume := newSpecWorkflowTestCommand(root, "resume")
+	mustSetFlag(t, resume, "from", "comment-a")
+	mustSetFlag(t, resume, "trigger", "comment-b")
+	mustSetFlag(t, resume, "owner", "boss")
+	if err := runSpecWorkflowResume(resume, []string{"ISS-1"}); err != nil {
+		t.Fatalf("runSpecWorkflowResume() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".spec", "issues", "ISS-1.md"))
+	if err != nil {
+		t.Fatalf("read issue workflow file: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"comment_workflows:",
+		"comment_id: comment-a",
+		"status: interrupted",
+		"comment_id: comment-b",
+		"intent: resume",
+		"parent_workflow: comment-a",
+		"Active thread: comment-b",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("workflow command output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func newSpecWorkflowTestCommand(root, name string) *cobra.Command {
+	cmd := &cobra.Command{Use: name}
+	cmd.Flags().String("root", root, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("comment", "", "")
+	cmd.Flags().String("intent", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("owner", "", "")
+	cmd.Flags().String("stage", "", "")
+	cmd.Flags().String("last-result", "", "")
+	cmd.Flags().String("next-action", "", "")
+	cmd.Flags().String("parent-workflow", "", "")
+	cmd.Flags().String("trigger-comment", "", "")
+	cmd.Flags().String("from", "", "")
+	cmd.Flags().String("trigger", "", "")
+	return cmd
+}
+
+func mustSetFlag(t *testing.T, cmd *cobra.Command, name, value string) {
+	t.Helper()
+	if err := cmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("set %s: %v", name, err)
+	}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

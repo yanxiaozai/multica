@@ -165,7 +165,7 @@ func WriteFileSnapshot(root string, snap FileSnapshot, force bool) (FileWriteSum
 		}
 	}
 	for _, issue := range snap.Issues {
-		issueRef := safeSnapshotSegment(issue.Issue, "issue")
+		issueRef := safeSnapshotSegment(canonicalIssueRef(issue.Issue), "issue")
 		path := filepath.Join(root, DirName, "issues", issueRef+".md")
 		state := IssueState{
 			Issue:         issueRef,
@@ -357,7 +357,7 @@ func readFileIssues(root string) ([]FileIssue, []string, error) {
 			continue
 		}
 		issues = append(issues, FileIssue{
-			Issue:         firstNonEmpty(state.Issue, issueID),
+			Issue:         canonicalIssueRef(firstNonEmpty(state.Issue, issueID)),
 			Title:         state.Title,
 			Primary:       state.Primary,
 			Related:       state.Related,
