@@ -447,6 +447,31 @@
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"
+    },
+    "tasks": {
+      "search_placeholder": "Search task runs...",
+      "filter": {
+        "all": "All",
+        "active": "Active",
+        "finished": "Finished"
+      },
+      "empty_title": "No task runs yet",
+      "empty_description": "When this agent runs from an issue, chat, quick create, or automation, the run will appear here.",
+      "no_match_title": "No matching task runs",
+      "no_match_description": "Try a different search or status filter.",
+      "show_more": "Show {{shown}} of {{total}} - load more",
+      "open_issue": "Issue",
+      "created_prefix": "Created {{when}}",
+      "completed_prefix": "Finished {{when}}",
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting for local directory",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "char_counter": {

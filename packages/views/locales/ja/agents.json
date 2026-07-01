@@ -424,6 +424,31 @@
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始"
+    },
+    "tasks": {
+      "search_placeholder": "タスク実行を検索...",
+      "filter": {
+        "all": "すべて",
+        "active": "アクティブ",
+        "finished": "完了"
+      },
+      "empty_title": "タスク実行はまだありません",
+      "empty_description": "このエージェントがイシュー、チャット、クイック作成、または自動化から実行されると、ここに表示されます。",
+      "no_match_title": "一致するタスク実行がありません",
+      "no_match_description": "別の検索語またはステータスフィルターを試してください。",
+      "show_more": "{{total}} 件中 {{shown}} 件を表示 - さらに読み込む",
+      "open_issue": "イシュー",
+      "created_prefix": "{{when}} に作成",
+      "completed_prefix": "{{when}} に完了",
+      "status": {
+        "queued": "待機中",
+        "dispatched": "ディスパッチ済み",
+        "waiting_local_directory": "ローカルディレクトリ待ち",
+        "running": "実行中",
+        "completed": "完了",
+        "failed": "失敗",
+        "cancelled": "キャンセル済み"
+      }
     }
   },
   "char_counter": {

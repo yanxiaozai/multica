@@ -37,7 +37,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
-import { ActorIssuesPanel } from "../../common/actor-issues-panel";
+import { TasksTab } from "./tabs/tasks-tab";
 import { useT } from "../../i18n";
 
 export type DetailTab =
@@ -239,7 +239,7 @@ export function AgentOverviewPane({
         {effectiveTab === "activity" && <ActivityTab agent={agent} />}
         {effectiveTab === "tasks" && (
           <div className="flex h-full min-h-[520px] flex-col">
-            <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+            <TasksTab agent={agent} />
           </div>
         )}
         {effectiveTab === "instructions" && (

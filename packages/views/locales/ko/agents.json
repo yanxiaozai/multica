@@ -442,6 +442,31 @@
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
       "queued_prefix": "{{when}} 대기 시작"
+    },
+    "tasks": {
+      "search_placeholder": "작업 실행 검색...",
+      "filter": {
+        "all": "전체",
+        "active": "활성",
+        "finished": "완료"
+      },
+      "empty_title": "아직 작업 실행이 없습니다",
+      "empty_description": "이 에이전트가 이슈, 채팅, 빠른 생성 또는 자동화에서 실행되면 여기에 표시됩니다.",
+      "no_match_title": "일치하는 작업 실행이 없습니다",
+      "no_match_description": "다른 검색어나 상태 필터를 시도해 보세요.",
+      "show_more": "{{total}}개 중 {{shown}}개 표시 - 더 불러오기",
+      "open_issue": "이슈",
+      "created_prefix": "{{when}} 생성됨",
+      "completed_prefix": "{{when}} 완료됨",
+      "status": {
+        "queued": "대기 중",
+        "dispatched": "디스패치됨",
+        "waiting_local_directory": "로컬 디렉터리 대기 중",
+        "running": "실행 중",
+        "completed": "완료됨",
+        "failed": "실패함",
+        "cancelled": "취소됨"
+      }
     }
   },
   "char_counter": {

@@ -205,7 +205,7 @@
   },
   "tabs": {
     "activity": "动态",
-    "tasks": "Tasks",
+    "tasks": "执行任务",
     "instructions": "指令",
     "spec_profile": "Spec Profile",
     "skills": "Skills",
@@ -432,6 +432,31 @@
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
       "queued_prefix": "{{when}}排队"
+    },
+    "tasks": {
+      "search_placeholder": "搜索 task run...",
+      "filter": {
+        "all": "全部",
+        "active": "进行中",
+        "finished": "已结束"
+      },
+      "empty_title": "还没有 task run",
+      "empty_description": "这个智能体从 issue、聊天、快速创建或自动化开始运行后，记录会出现在这里。",
+      "no_match_title": "没有匹配的 task run",
+      "no_match_description": "试试不同的搜索词或状态筛选。",
+      "show_more": "已显示 {{shown}} / {{total}}，加载更多",
+      "open_issue": "Issue",
+      "created_prefix": "{{when}}创建",
+      "completed_prefix": "{{when}}结束",
+      "status": {
+        "queued": "排队中",
+        "dispatched": "已派发",
+        "waiting_local_directory": "等待本地目录",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      }
     }
   },
   "char_counter": {
