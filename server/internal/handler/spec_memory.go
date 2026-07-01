@@ -362,6 +362,31 @@ func (h *Handler) ListSpecModules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"modules": resp})
 }
 
+func (h *Handler) ListSpecEpicDocuments(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	epicID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "epicId"), "epic id")
+	if !ok {
+		return
+	}
+	docs, err := h.Queries.ListSpecDocumentsByEpic(r.Context(), db.ListSpecDocumentsByEpicParams{
+		WorkspaceID: wsUUID,
+		EpicID:      epicID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list spec documents")
+		return
+	}
+	resp := make([]SpecDocumentResponse, len(docs))
+	for i, doc := range docs {
+		resp[i] = specDocumentToResponse(doc)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"documents": resp})
+}
+
 func (h *Handler) ListSpecModuleDocuments(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")

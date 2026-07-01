@@ -6,6 +6,8 @@ export const specMemoryKeys = {
   epics: (wsId: string) => [...specMemoryKeys.all(wsId), "epics"] as const,
   modules: (wsId: string, epicId: string) =>
     [...specMemoryKeys.all(wsId), "epics", epicId, "modules"] as const,
+  epicDocuments: (wsId: string, epicId: string) =>
+    [...specMemoryKeys.all(wsId), "epics", epicId, "documents"] as const,
   documents: (wsId: string, moduleId: string) =>
     [...specMemoryKeys.all(wsId), "modules", moduleId, "documents"] as const,
   issue: (wsId: string, issueId: string) =>
@@ -25,6 +27,15 @@ export function specModuleListOptions(wsId: string, epicId: string) {
     queryKey: specMemoryKeys.modules(wsId, epicId),
     queryFn: () => api.listSpecModules(epicId),
     select: (data) => data.modules,
+    enabled: !!epicId,
+  });
+}
+
+export function specEpicDocumentListOptions(wsId: string, epicId: string) {
+  return queryOptions({
+    queryKey: specMemoryKeys.epicDocuments(wsId, epicId),
+    queryFn: () => api.listSpecEpicDocuments(epicId),
+    select: (data) => data.documents,
     enabled: !!epicId,
   });
 }

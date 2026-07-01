@@ -185,6 +185,9 @@ const desktopAPI = {
    *  path isn't a repo, has no origin, or git is missing. */
   detectGitRemote: (path: string) =>
     ipcRenderer.invoke("local-directory:detect-git-remote", path),
+  /** Read a local project's .spec files into the backend sync snapshot shape. */
+  readSpecSnapshot: (root: string) =>
+    ipcRenderer.invoke("spec-memory:read-snapshot", root),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */

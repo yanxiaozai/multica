@@ -160,3 +160,77 @@ export interface CreateSpecDecisionRequest {
 export interface CreateSpecDecisionResponse {
   decision: SpecDecision;
 }
+
+export interface SyncSpecAudit {
+  mode: string;
+  skipped: boolean;
+  skip_reason?: string;
+  skipped_by?: string;
+  skipped_at?: string;
+}
+
+export interface SyncSpecDocumentInput {
+  doc_kind: string;
+  title: string;
+  body: string;
+  source_path: string;
+}
+
+export interface SyncSpecModuleInput {
+  key: string;
+  title: string;
+  description: string;
+  stability: string;
+  documents: SyncSpecDocumentInput[];
+}
+
+export interface SyncSpecEpicInput {
+  key: string;
+  title: string;
+  description: string;
+  stability: string;
+  documents: SyncSpecDocumentInput[];
+  modules: SyncSpecModuleInput[];
+}
+
+export interface SyncSpecIssueInput {
+  issue: string;
+  title: string;
+  primary: string;
+  related: string[];
+  status: string;
+  owner: string;
+  current_stage: string;
+  current_loop: string;
+  last_result: string;
+  open_questions: string[];
+  blockers: string[];
+  next_handoff: string;
+  audit: SyncSpecAudit;
+  updated_at: string;
+  source_path: string;
+}
+
+export interface SyncSpecDecisionInput {
+  title: string;
+  body: string;
+  actor: string;
+  source_path: string;
+}
+
+export interface SyncSpecFromFilesRequest {
+  epics: SyncSpecEpicInput[];
+  issues: SyncSpecIssueInput[];
+  decisions: SyncSpecDecisionInput[];
+  skipped_issue_files: string[];
+}
+
+export interface SyncSpecFromFilesResponse {
+  epics: number;
+  modules: number;
+  documents: number;
+  issues: number;
+  issue_mappings: number;
+  decisions: number;
+  skipped_issue_files: string[];
+}

@@ -2,6 +2,7 @@ export {
   specMemoryKeys,
   specEpicListOptions,
   specModuleListOptions,
+  specEpicDocumentListOptions,
   specDocumentListOptions,
   issueSpecOptions,
 } from "./queries";
@@ -10,4 +11,5 @@ export {
   useUpdateIssueSpecState,
   useUpdateSpecDocument,
   useCreateSpecDecision,
+  useSyncSpecFromFiles,
 } from "./mutations";

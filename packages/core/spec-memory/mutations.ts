@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import type {
   CreateSpecDecisionRequest,
+  SyncSpecFromFilesRequest,
   UpdateIssueSpecMappingRequest,
   UpdateIssueSpecStateRequest,
   UpdateSpecDocumentRequest,
@@ -60,6 +61,19 @@ export function useCreateSpecDecision() {
         });
       }
       qc.invalidateQueries({ queryKey: specMemoryKeys.epics(wsId) });
+    },
+  });
+}
+
+export function useSyncSpecFromFiles() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: SyncSpecFromFilesRequest) =>
+      api.syncSpecFromFiles(data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: specMemoryKeys.epics(wsId) });
+      qc.invalidateQueries({ queryKey: specMemoryKeys.all(wsId) });
     },
   });
 }

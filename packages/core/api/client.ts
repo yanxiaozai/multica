@@ -142,6 +142,8 @@ import type {
   ListSpecEpicsResponse,
   ListSpecModulesResponse,
   SpecIssueContext,
+  SyncSpecFromFilesRequest,
+  SyncSpecFromFilesResponse,
   UpdateIssueSpecMappingRequest,
   UpdateIssueSpecMappingResponse,
   UpdateIssueSpecStateRequest,
@@ -249,6 +251,7 @@ import {
   EMPTY_LIST_SPEC_EPICS_RESPONSE,
   EMPTY_LIST_SPEC_MODULES_RESPONSE,
   EMPTY_SPEC_ISSUE_CONTEXT,
+  EMPTY_SYNC_SPEC_FROM_FILES_RESPONSE,
   EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE,
   EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE,
   EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE,
@@ -257,6 +260,7 @@ import {
   ListSpecEpicsResponseSchema,
   ListSpecModulesResponseSchema,
   SpecIssueContextSchema,
+  SyncSpecFromFilesResponseSchema,
   UpdateIssueSpecMappingResponseSchema,
   UpdateIssueSpecStateResponseSchema,
   UpdateSpecDocumentResponseSchema,
@@ -746,6 +750,13 @@ export class ApiClient {
     });
   }
 
+  async listSpecEpicDocuments(epicId: string): Promise<ListSpecDocumentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/epics/${epicId}/documents`);
+    return parseWithFallback(raw, ListSpecDocumentsResponseSchema, EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE, {
+      endpoint: "GET /api/spec/epics/:id/documents",
+    });
+  }
+
   async listSpecDocuments(moduleId: string): Promise<ListSpecDocumentsResponse> {
     const raw = await this.fetch<unknown>(`/api/spec/modules/${moduleId}/documents`);
     return parseWithFallback(raw, ListSpecDocumentsResponseSchema, EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE, {
@@ -770,6 +781,16 @@ export class ApiClient {
     });
     return parseWithFallback(raw, CreateSpecDecisionResponseSchema, EMPTY_CREATE_SPEC_DECISION_RESPONSE, {
       endpoint: "POST /api/spec/decisions",
+    });
+  }
+
+  async syncSpecFromFiles(data: SyncSpecFromFilesRequest): Promise<SyncSpecFromFilesResponse> {
+    const raw = await this.fetch<unknown>("/api/spec/sync/from-files", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SyncSpecFromFilesResponseSchema, EMPTY_SYNC_SPEC_FROM_FILES_RESPONSE, {
+      endpoint: "POST /api/spec/sync/from-files",
     });
   }
 

@@ -1,3 +1,5 @@
+import type { SyncSpecFromFilesRequest } from "@multica/core/types";
+
 // Desktop-only helpers for the project_resource local_directory flow.
 //
 // These wrap the preload `desktopAPI` surface so view components can
@@ -31,6 +33,7 @@ interface DesktopLocalDirectoryAPI {
     path: string,
   ) => Promise<ValidateLocalDirectoryResult>;
   detectGitRemote?: (path: string) => Promise<DetectGitRemoteResult>;
+  readSpecSnapshot?: (root: string) => Promise<ReadSpecSnapshotResult>;
 }
 
 /** Result of probing a local folder for its git origin remote. `unsupported`
@@ -48,6 +51,20 @@ export type DetectGitRemoteResult = {
     | "unsupported";
   error?: string;
 };
+
+export type ReadSpecSnapshotResult =
+  | { ok: true; snapshot: SyncSpecFromFilesRequest }
+  | {
+      ok: false;
+      reason:
+        | "not_absolute"
+        | "not_found"
+        | "not_a_directory"
+        | "no_spec"
+        | "error"
+        | "unsupported";
+      error?: string;
+    };
 
 /** Parsed view of a git remote URL — the bare host (for matching against a
  *  GitLab integration's base_url) and the project ref (group/sub/proj). */
@@ -96,6 +113,20 @@ export async function detectGitRemote(
   if (!api?.detectGitRemote) return { ok: false, reason: "unsupported" };
   try {
     return await api.detectGitRemote(path);
+  } catch (err) {
+    return { ok: false, reason: "error", error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Read a local project's .spec folder via the desktop preload. Web cannot
+ *  access local files, so it returns `unsupported`. */
+export async function readSpecSnapshot(
+  root: string,
+): Promise<ReadSpecSnapshotResult> {
+  const api = readDesktopAPI();
+  if (!api?.readSpecSnapshot) return { ok: false, reason: "unsupported" };
+  try {
+    return await api.readSpecSnapshot(root);
   } catch (err) {
     return { ok: false, reason: "error", error: err instanceof Error ? err.message : String(err) };
   }

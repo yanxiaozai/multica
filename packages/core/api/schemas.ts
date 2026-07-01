@@ -32,6 +32,7 @@ import type {
   SpecIssueMapping,
   SpecIssueState,
   SpecModule,
+  SyncSpecFromFilesResponse,
   ListSpecDocumentsResponse,
   ListSpecEpicsResponse,
   ListSpecModulesResponse,
@@ -532,6 +533,26 @@ export const CreateSpecDecisionResponseSchema = z.object({
 
 export const EMPTY_CREATE_SPEC_DECISION_RESPONSE: CreateSpecDecisionResponse = {
   decision: EMPTY_SPEC_DECISION,
+};
+
+export const SyncSpecFromFilesResponseSchema = z.object({
+  epics: z.number().default(0),
+  modules: z.number().default(0),
+  documents: z.number().default(0),
+  issues: z.number().default(0),
+  issue_mappings: z.number().default(0),
+  decisions: z.number().default(0),
+  skipped_issue_files: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_SYNC_SPEC_FROM_FILES_RESPONSE: SyncSpecFromFilesResponse = {
+  epics: 0,
+  modules: 0,
+  documents: 0,
+  issues: 0,
+  issue_mappings: 0,
+  decisions: 0,
+  skipped_issue_files: [],
 };
 
 const SearchIssueResultSchema = IssueSchema.extend({

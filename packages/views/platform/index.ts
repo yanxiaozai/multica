@@ -7,10 +7,12 @@ export {
   pickDirectory,
   validateLocalDirectory,
   detectGitRemote,
+  readSpecSnapshot,
   parseGitRemote,
   type PickDirectoryResult,
   type ValidateLocalDirectoryResult,
   type DetectGitRemoteResult,
+  type ReadSpecSnapshotResult,
   type ParsedGitRemote,
 } from "./local-directory";
 export {

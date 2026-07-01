@@ -4,6 +4,7 @@ import {
   Navigate,
   Outlet,
   useMatches,
+  useParams,
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
@@ -58,6 +59,11 @@ function DesktopSettingsRoute() {
       ]}
     />
   );
+}
+
+function DesktopSpecMemoryRoute() {
+  const { id = "" } = useParams();
+  return <SpecMemoryPage projectId={id} />;
 }
 
 /**
@@ -140,7 +146,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "projects/:id/spec-memory",
-            element: <SpecMemoryPage />,
+            element: <DesktopSpecMemoryRoute />,
             handle: { title: "Spec Memory" },
           },
           {

@@ -6,6 +6,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupSpecMemory } from "./spec-memory";
 import { setupClaudeAgents } from "./claude-agents";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
@@ -534,6 +535,7 @@ if (!gotTheLock) {
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
+    setupSpecMemory();
     setupClaudeAgents();
 
     // macOS: deep link arrives via open-url event

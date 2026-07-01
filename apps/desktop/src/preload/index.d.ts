@@ -86,6 +86,23 @@ interface DesktopAPI {
     reason?: "not_absolute" | "not_git_repo" | "no_origin" | "git_not_found" | "error";
     error?: string;
   }>;
+  /** Read a local project's .spec files into the backend sync snapshot shape. */
+  readSpecSnapshot: (root: string) => Promise<
+    | {
+        ok: true;
+        snapshot: import("@multica/core/types").SyncSpecFromFilesRequest;
+      }
+    | {
+        ok: false;
+        reason:
+          | "not_absolute"
+          | "not_found"
+          | "not_a_directory"
+          | "no_spec"
+          | "error";
+        error?: string;
+      }
+  >;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

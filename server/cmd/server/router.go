@@ -902,6 +902,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/sync/from-files", h.SyncSpecFromFiles)
 				r.Get("/sync/to-files", h.SyncSpecToFiles)
 				r.Get("/epics", h.ListSpecEpics)
+				r.Get("/epics/{epicId}/documents", h.ListSpecEpicDocuments)
 				r.Get("/epics/{epicId}/modules", h.ListSpecModules)
 				r.Get("/modules/{moduleId}/documents", h.ListSpecModuleDocuments)
 				r.Put("/modules/{moduleId}/documents/{docKind}", h.UpdateSpecModuleDocument)

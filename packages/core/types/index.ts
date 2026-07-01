@@ -112,6 +112,7 @@ export type {
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
 } from "./github";
+export type * from "./spec-memory";
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
