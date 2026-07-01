@@ -211,12 +211,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Slack-only deployment has no Lark key). Platform adapters register a
 	// Factory + ResolverSet into it below; the Supervisor enumerates active
 	// installations across ALL channel types and routes each to its
-	// registered platform's Factory. With no platform registered the store
-	// still lists any active installation rows, but Registry.Build returns
-	// ErrUnknownType for them, so the supervisor logs and backs off without
-	// opening a connection (the normal state is simply that no rows exist
-	// for an unregistered platform). The Router is the single shared inbound
-	// handler injected into every Channel.
+	// registered platform's Factory. Installations whose channel_type has no
+	// registered Factory are skipped by the Supervisor — either no platform is
+	// configured, or (Slack/B2) the platform drives ONE deployment-level
+	// connection of its own outside the per-installation supervisor. The Router
+	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
 	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{Logger: slog.Default()})
 	// Debounce the per-session run trigger so a burst of messages collapses
@@ -411,26 +410,97 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
 
-	// Slack integration (MUL-3516). Gated by MULTICA_SLACK_SECRET_KEY — the key
-	// that decrypts the bot/app tokens stored on the channel_installation row.
-	// When unset the whole block is skipped, so existing deployments are
-	// unaffected; an operator opts in by setting the key and creating a
-	// channel_type='slack' installation (config: app_id=team_id, bot_user_id,
-	// bot_token_encrypted, app_token_encrypted). Registering the Factory
-	// (Socket Mode connect/send) + ResolverSet (inbound pipeline) + the outbound
-	// subscriber (agent reply -> Slack) is all it takes — no engine or core edit,
-	// and Feishu is untouched. The Slack ResolverSet/Outbound share the same
-	// engine.ChatSession, channel_* tables, IssueService and TaskService as
-	// Feishu, so /issue, dedup, and run-triggering behave identically.
+	// Slack integration. Multi-tenant B2 model (MUL-3666): Multica hosts ONE
+	// Slack app, workspaces self-install via OAuth, and inbound runs on a single
+	// deployment-level Socket Mode connection routed by team_id — replacing the
+	// stage-3 per-installation connection model (MUL-3516).
+	//
+	// Two deployment-level env vars gate the two halves:
+	//   - MULTICA_SLACK_SECRET_KEY decrypts the per-installation bot token
+	//     (xoxb-) stored on the channel_installation row. It gates the inbound
+	//     ResolverSet + the outbound reply subscriber, so without it there is no
+	//     Slack at all.
+	//   - MULTICA_SLACK_APP_TOKEN is the app-level token (xapp-) authorizing the
+	//     single Socket Mode connection. It cannot be obtained via OAuth, so it
+	//     is a one-time operator config. Without it, inbound is disabled (the
+	//     ResolverSet + outbound are still wired so an existing install's replies
+	//     keep flowing, but no new events are received).
+	//
+	// The ResolverSet/Outbound share the same engine.ChatSession, channel_*
+	// tables, IssueService and TaskService as Feishu, so /issue, dedup, and
+	// run-triggering behave identically. Feishu is untouched. Each Slack
+	// installation is a bring-your-own-app (BYO) install carrying its OWN
+	// app-level token, so a per-installation Slack Factory is registered and the
+	// Supervisor drives one Socket Mode connection per installation (like Feishu).
 	if slackKey, err := secretbox.LoadKey("MULTICA_SLACK_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(slackKey)
 		if err != nil {
 			slog.Error("slack: secretbox.New failed; slack integration disabled", "error", err)
 		} else {
-			slack.RegisterSlack(channelRegistry, slack.SlackChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
-			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool))
+			// Outbound replier (MUL-3666): delivers NeedsBinding prompt /
+			// AgentOffline / AgentArchived / issue-created notices. The binding
+			// token service mints the single-use token embedded in the prompt's
+			// redeem link; the redeem endpoint (registered below, public) binds
+			// the Slack user to their Multica account.
+			slackBindingSvc := slack.NewBindingTokenService(queries, pool)
+			h.SlackBindingTokens = slackBindingSvc
+			slackReplier := slack.NewOutboundReplier(slack.OutboundReplierConfig{
+				Binding: slackBindingSvc,
+				Decrypt: box.Open,
+				// The bind link (/slack/bind) is a web-app page, so it must use the
+				// app URL (MULTICA_APP_URL ?? FRONTEND_ORIGIN), NOT MULTICA_PUBLIC_URL
+				// (the backend/API URL). Mirrors the Lark replier (appURLFromEnv).
+				AppURL: appURLFromEnv(),
+				Logger: slog.Default(),
+			})
+			// Typing indicator (MUL-3874): a 👀 reaction on the user's message
+			// while the agent works, cleared when the run finishes or fails.
+			// Best-effort; failures are logged only. Registered before the
+			// outbound reply subscriber so, on EventChatDone, the reaction clears
+			// ahead of the reply (bus delivery is synchronous, in subscription
+			// order). Subscribing here is also the only path that clears the
+			// reaction on a failed run, which the outbound replier does not handle.
+			slackTyping := slack.NewTypingIndicatorManager(queries, box.Open, slog.Default())
+			slackTyping.Register(bus)
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
-			slog.Info("slack integration enabled")
+
+			// On-demand history reader behind the unified `multica chat history`
+			// command (MUL-3871): pull the session's Slack conversation when the
+			// agent asks, instead of force-assembling it on every inbound.
+			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
+
+			// `/issue` slash command (MUL-3908): a real Slack slash command,
+			// delivered over the same Socket Mode connection. It is a quick-create
+			// entry point — the invoker's natural-language description is enqueued as
+			// a quick-create task (no chat session or chat run) and the agent authors
+			// the well-formed issue in the background — reusing the shared TaskService
+			// + binding service. The invoker gets a private ephemeral acknowledgement
+			// and a Multica notification when the issue lands.
+			slackSlash := slack.NewSlashCommandProcessor(slack.SlashCommandConfig{
+				Queries: queries,
+				Tasks:   h.TaskService,
+				Binding: slackBindingSvc,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// Socket Mode connection per active Slack installation, authenticated
+			// with that installation's OWN app-level token (xapp-, pasted at BYO
+			// install) — no deployment-level app token, no single connection.
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash})
+
+			// BYO self-serve install (paste bot token + app-level token). The
+			// InstallService needs only the at-rest encryption key — there is no
+			// hosted OAuth client credential.
+			installSvc, ierr := slack.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("slack: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.SlackInstall = installSvc
+			}
+			slog.Info("slack integration enabled (BYO per-installation socket mode)")
 		}
 	} else {
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
@@ -550,12 +620,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
-	// Local file serving (when using local storage)
-	if local, ok := store.(*storage.LocalStorage); ok {
-		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
-			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
-			local.ServeFile(w, r, file)
-		})
+	// Local file serving (when using local storage). Served through the
+	// handler so /uploads/* carries the same preview security headers as the
+	// /api/attachments download endpoint; self-hosted split-origin/same-origin
+	// clients can then iframe-preview PDFs/HTML fetched straight from the
+	// static route instead of hitting the global frame-ancestors 'none' CSP.
+	// See MUL-3821 / #4477.
+	if _, ok := store.(*storage.LocalStorage); ok {
+		r.Get("/uploads/*", h.ServeLocalUpload)
 	}
 
 	// Auth (public) — per-IP rate limiting.
@@ -583,6 +655,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// Slack OAuth callback (no Multica auth in the path — it is hit by Slack's
+	// browser redirect; the workspace/agent/initiator are recovered from the
+	// sealed state). It exchanges the code, upserts the install, then bounces
+	// the browser back to Settings → Integrations.
 	// Stripe webhook (no Multica auth — Stripe signs the raw body
 	// with a shared secret, the multica-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see
@@ -735,6 +811,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/lark/install/begin", h.BeginLarkInstall)
 					r.Get("/lark/install/{sessionId}/status", h.GetLarkInstallStatus)
 				})
+
+				// Slack integration (MUL-3666). Same admin/member split as
+				// Lark: listing is member-visible; OAuth begin + revoke are
+				// admin-only. The OAuth callback itself is a public route (it is
+				// hit by Slack's browser redirect with no workspace in the path)
+				// and is registered outside this workspace group.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/slack/installations", h.ListSlackInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
+					r.Post("/slack/install/byo", h.RegisterSlackBYO)
+				})
 			})
 		})
 
@@ -745,6 +836,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// the token only proves "this open_id requested binding," and
 		// is combined with the logged-in user to create the mapping.
 		r.Post("/api/lark/binding/redeem", h.RedeemLarkBindingToken)
+		// Slack binding-token redemption. Same rationale as Lark: NOT
+		// workspace-scoped because the redeemer hits this before they have any
+		// workspace context — the redemption itself mints their binding row. The
+		// logged-in user (from the session) is bound to the Slack id the token
+		// carries.
+		r.Post("/api/slack/binding/redeem", h.RedeemSlackBindingToken)
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)
@@ -952,6 +1049,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/rotate-webhook-token", h.RotateAutopilotTriggerWebhookToken)
 						r.Put("/signing-secret", h.SetAutopilotTriggerSigningSecret)
 					})
+					r.Post("/collaborators", h.AddAutopilotCollaborator)
+					r.Delete("/collaborators/{userId}", h.RemoveAutopilotCollaborator)
 				})
 			})
 
@@ -1120,10 +1219,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
+			// Agent-facing channel reads (MUL-3871). The caller's task-scoped token
+			// resolves to its own chat session; no session/channel id is passed, so
+			// an agent can only read its own conversation. `history` is the channel
+			// overview (top-level messages + thread metadata); `thread` reads one
+			// thread (?id for a specific one, else the thread the session is in).
+			r.Get("/api/chat/history", h.GetChatChannelHistory)
+			r.Get("/api/chat/thread", h.GetChatThread)
+
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
+				// Cross-workspace unread summary: account-level, keyed on the
+				// user. Backs the workspace-switcher dot for OTHER workspaces.
+				r.Get("/unread-summary", h.UnreadInboxSummary)
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
