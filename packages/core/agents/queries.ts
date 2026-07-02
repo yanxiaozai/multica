@@ -69,6 +69,12 @@ export const agentTasksKeys = {
     [...agentTasksKeys.all(wsId), agentId] as const,
 };
 
+export const agentLearningKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "agent-learning"] as const,
+  reports: (wsId: string, agentId: string) =>
+    [...agentLearningKeys.all(wsId), "reports", agentId] as const,
+};
+
 // All tasks for a single agent (the agent detail page consumer). Powers both
 // the inspector's 7-day throughput stats and the Tasks tab list — shared so
 // they don't fetch twice. WS task events invalidate this via the existing
@@ -77,6 +83,16 @@ export function agentTasksOptions(wsId: string, agentId: string) {
   return queryOptions({
     queryKey: agentTasksKeys.detail(wsId, agentId),
     queryFn: () => api.listAgentTasks(agentId),
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function agentLearningReportsOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: agentLearningKeys.reports(wsId, agentId),
+    queryFn: () => api.listAgentLearningReports(agentId),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

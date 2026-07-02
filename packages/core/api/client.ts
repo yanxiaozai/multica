@@ -12,7 +12,10 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
+  AgentEvolutionApplication,
+  AgentLearningReport,
   CreateAgentRequest,
+  CreateAgentLearningReportRequest,
   AgentTemplate,
   AgentTemplateSummary,
   CreateAgentFromTemplateRequest,
@@ -170,6 +173,9 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AgentEvolutionApplicationSchema,
+  AgentLearningReportListSchema,
+  AgentLearningReportSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChildIssuesResponseSchema,
@@ -185,6 +191,8 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_AGENT_EVOLUTION_APPLICATION,
+  EMPTY_AGENT_LEARNING_REPORT,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_CLOUD_RUNTIME_NODE,
@@ -1081,6 +1089,7 @@ export class ApiClient {
       : [];
     return {
       imported: typeof body.imported === "number" ? body.imported : 0,
+      updated: typeof body.updated === "number" ? body.updated : 0,
       skipped: typeof body.skipped === "number" ? body.skipped : 0,
       failed: typeof body.failed === "number" ? body.failed : 0,
       errors,
@@ -1237,6 +1246,13 @@ export class ApiClient {
     });
   }
 
+  async listAgentLearningReports(agentId: string): Promise<AgentLearningReport[]> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/learning-reports`);
+    return parseWithFallback(raw, AgentLearningReportListSchema, [], {
+      endpoint: "GET /api/agents/:id/learning-reports",
+    });
+  }
+
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
@@ -1276,6 +1292,40 @@ export class ApiClient {
   // surfaces can clear their live cards.
   async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
+  async createAgentLearningReport(
+    data: CreateAgentLearningReportRequest,
+  ): Promise<AgentLearningReport> {
+    const raw = await this.fetch<unknown>("/api/agent-learning-reports", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentLearningReportSchema, EMPTY_AGENT_LEARNING_REPORT, {
+      endpoint: "POST /api/agent-learning-reports",
+    });
+  }
+
+  async getAgentLearningReport(reportId: string): Promise<AgentLearningReport> {
+    const raw = await this.fetch<unknown>(`/api/agent-learning-reports/${reportId}`);
+    return parseWithFallback(raw, AgentLearningReportSchema, EMPTY_AGENT_LEARNING_REPORT, {
+      endpoint: "GET /api/agent-learning-reports/:id",
+    });
+  }
+
+  async applyAgentEvolutionSuggestion(
+    suggestionId: string,
+  ): Promise<AgentEvolutionApplication> {
+    const raw = await this.fetch<unknown>(
+      `/api/agent-evolution-suggestions/${suggestionId}/apply`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      AgentEvolutionApplicationSchema,
+      EMPTY_AGENT_EVOLUTION_APPLICATION,
+      { endpoint: "POST /api/agent-evolution-suggestions/:id/apply" },
+    );
   }
 
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
@@ -2001,6 +2051,13 @@ export class ApiClient {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async listIssueLearningReports(issueId: string): Promise<AgentLearningReport[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/learning-reports`);
+    return parseWithFallback(raw, AgentLearningReportListSchema, [], {
+      endpoint: "GET /api/issues/:id/learning-reports",
     });
   }
 

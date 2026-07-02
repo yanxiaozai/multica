@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentEvolutionApplication,
+  AgentLearningReport,
   AgentTemplate,
   AgentTemplateSummary,
   Attachment,
@@ -1041,6 +1043,78 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+export const AgentEvolutionApplicationSchema = z.object({
+  id: z.string().default(""),
+  suggestion_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  applied_by: z.string().nullable().default(null),
+  target_type: z.enum(["agent", "skill"]).catch("agent"),
+  target_id: z.string().default(""),
+  before_content: z.string().default(""),
+  after_content: z.string().default(""),
+  created_at: z.string().default(""),
+}).loose();
+
+export const AgentEvolutionSuggestionSchema = z.object({
+  id: z.string().default(""),
+  report_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  scope: z.enum(["personal_agent", "workspace_skill", "builtin_skill_candidate"]).catch("personal_agent"),
+  risk: z.enum(["safe", "review", "manual"]).catch("review"),
+  status: z.enum(["pending", "applied", "dismissed"]).catch("pending"),
+  target_type: z.enum(["agent", "skill", "builtin_skill"]).catch("agent"),
+  target_id: z.string().nullable().default(null),
+  title: z.string().default(""),
+  rationale: z.string().default(""),
+  proposed_content: z.string().default(""),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  applications: z.array(AgentEvolutionApplicationSchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  applied_at: z.string().nullable().default(null),
+  dismissed_at: z.string().nullable().default(null),
+}).loose();
+
+export const AgentLearningReportSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  issue_id: z.string().nullable().default(null),
+  task_id: z.string().nullable().default(null),
+  agent_id: z.string().default(""),
+  summary: z.string().default(""),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  suggestions: z.array(AgentEvolutionSuggestionSchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const AgentLearningReportListSchema = z.array(AgentLearningReportSchema);
+
+export const EMPTY_AGENT_EVOLUTION_APPLICATION: AgentEvolutionApplication = {
+  id: "",
+  suggestion_id: "",
+  workspace_id: "",
+  applied_by: null,
+  target_type: "agent",
+  target_id: "",
+  before_content: "",
+  after_content: "",
+  created_at: "",
+};
+
+export const EMPTY_AGENT_LEARNING_REPORT: AgentLearningReport = {
+  id: "",
+  workspace_id: "",
+  issue_id: null,
+  task_id: null,
+  agent_id: "",
+  summary: "",
+  metadata: {},
+  suggestions: [],
+  created_at: "",
+  updated_at: "",
 };
 
 // Squad list responses carry lightweight membership previews used by hover

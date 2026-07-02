@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  AgentLearningReportSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
@@ -213,6 +214,72 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+});
+
+describe("AgentLearningReportSchema", () => {
+  it("parses learning reports with evolution suggestions and applications", () => {
+    const parsed = AgentLearningReportSchema.parse({
+      id: "report-1",
+      workspace_id: "workspace-1",
+      issue_id: "issue-1",
+      task_id: "task-1",
+      agent_id: "agent-1",
+      summary: "The agent learned to update shared schemas.",
+      metadata: { source: "issue_done" },
+      suggestions: [
+        {
+          id: "suggestion-1",
+          report_id: "report-1",
+          workspace_id: "workspace-1",
+          scope: "workspace_skill",
+          risk: "review",
+          status: "applied",
+          target_type: "skill",
+          target_id: "skill-1",
+          title: "Schema coupling",
+          rationale: "Endpoint changes need client schemas.",
+          proposed_content: "Update API schemas with endpoint changes.",
+          metadata: {},
+          applications: [
+            {
+              id: "application-1",
+              suggestion_id: "suggestion-1",
+              workspace_id: "workspace-1",
+              applied_by: "user-1",
+              target_type: "skill",
+              target_id: "skill-1",
+              before_content: "# Skill",
+              after_content: "# Skill\n\n## Agent Evolution",
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          applied_at: "2026-01-01T00:00:00Z",
+          dismissed_at: null,
+        },
+      ],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    expect(parsed.suggestions[0]?.scope).toBe("workspace_skill");
+    expect(parsed.suggestions[0]?.applications[0]?.target_type).toBe("skill");
+  });
+
+  it("defaults additive fields for older or partial responses", () => {
+    const parsed = AgentLearningReportSchema.parse({
+      id: "report-1",
+      workspace_id: "workspace-1",
+      agent_id: "agent-1",
+    });
+
+    expect(parsed.issue_id).toBeNull();
+    expect(parsed.task_id).toBeNull();
+    expect(parsed.summary).toBe("");
+    expect(parsed.metadata).toEqual({});
+    expect(parsed.suggestions).toEqual([]);
   });
 });
 
