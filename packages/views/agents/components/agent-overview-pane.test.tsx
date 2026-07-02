@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -21,6 +22,9 @@ vi.mock("./tabs/instructions-tab", () => ({
 }));
 vi.mock("./tabs/skills-tab", () => ({
   SkillsTab: () => <div>skills-tab</div>,
+}));
+vi.mock("./tabs/learning-tab", () => ({
+  LearningTab: () => <div>learning-tab</div>,
 }));
 vi.mock("./tabs/env-tab", () => ({
   EnvTab: () => <div>env-tab</div>,
@@ -120,6 +124,7 @@ function renderPane(runtimes: AgentRuntime[]) {
           agent={baseAgent}
           runtimes={runtimes}
           onUpdate={vi.fn().mockResolvedValue(undefined)}
+          canEdit
         />
       </QueryClientProvider>
     </I18nProvider>,
@@ -129,6 +134,10 @@ function renderPane(runtimes: AgentRuntime[]) {
 beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
   slackListingRef.current = { installations: [], configured: false };
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe("AgentOverviewPane MCP tab visibility", () => {

@@ -208,6 +208,7 @@
     "instructions": "指令",
     "spec_profile": "Spec Profile",
     "skills": "Skills",
+    "learning": "学习",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
@@ -386,6 +387,44 @@
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
+    },
+    "learning": {
+      "auto_title": "自动进化安全的智能体学习",
+      "auto_hint": "当 Learning Report 提出安全的个人智能体改进时，Multica 可以自动追加到该智能体指令里。Skill 和人工复核建议仍需手动确认。",
+      "auto_enabled_toast": "已开启自动进化",
+      "auto_disabled_toast": "已关闭自动进化",
+      "reports_title": "Learning Reports",
+      "reports_hint": "{{count}} 条待处理建议",
+      "refresh": "刷新",
+      "empty_title": "还没有 Learning Report",
+      "empty_hint": "issue 工作完成并记录该智能体学到了什么、哪些指令或 skill 可改进后，会在这里出现报告。",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "{{count}} 条建议",
+      "no_suggestions": "这份报告没有建议。",
+      "suggestion_fallback": "进化建议",
+      "apply_agent_action": "进化智能体",
+      "apply_skill_action": "更新 Skill",
+      "applied_action": "已应用",
+      "dismissed_action": "已忽略",
+      "manual_action": "人工复核",
+      "builtin_action": "候选项",
+      "apply_success_toast": "已应用进化建议",
+      "apply_failed_toast": "应用进化建议失败",
+      "scope": {
+        "personal_agent": "智能体",
+        "workspace_skill": "Skill",
+        "builtin_skill_candidate": "内置候选"
+      },
+      "risk": {
+        "safe": "安全",
+        "review": "需复核",
+        "manual": "人工"
+      },
+      "status": {
+        "pending": "待处理",
+        "applied": "已应用",
+        "dismissed": "已忽略"
+      }
     },
     "integrations": {
       "intro": "把这个智能体连接到外部聊天平台，让大家在自己熟悉的工具里直接与它协作。",

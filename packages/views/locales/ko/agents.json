@@ -208,6 +208,7 @@
     "instructions": "지침",
     "spec_profile": "Spec Profile",
     "skills": "스킬",
+    "learning": "학습",
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
@@ -386,6 +387,44 @@
       "add_dialog_confirm_other": "스킬 {{count}}개 추가",
       "add_dialog_cancel": "취소",
       "add_failed_toast": "스킬을 추가하지 못했습니다"
+    },
+    "learning": {
+      "auto_title": "안전한 에이전트 학습 자동 적용",
+      "auto_hint": "Learning Report가 안전한 개인 에이전트 개선을 제안하면 Multica가 이 에이전트의 지침에 자동으로 추가할 수 있습니다. 스킬 및 수동 검토 제안은 계속 확인이 필요합니다.",
+      "auto_enabled_toast": "자동 진화를 켰습니다",
+      "auto_disabled_toast": "자동 진화를 껐습니다",
+      "reports_title": "Learning Reports",
+      "reports_hint": "대기 중인 제안 {{count}}개",
+      "refresh": "새로고침",
+      "empty_title": "아직 Learning Report가 없습니다",
+      "empty_hint": "완료된 issue 작업에서 이 에이전트가 배운 점과 개선 가능한 지침 또는 스킬이 기록되면 여기에 표시됩니다.",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "제안 {{count}}개",
+      "no_suggestions": "이 리포트에는 제안이 없습니다.",
+      "suggestion_fallback": "진화 제안",
+      "apply_agent_action": "에이전트 진화",
+      "apply_skill_action": "스킬 업데이트",
+      "applied_action": "적용됨",
+      "dismissed_action": "무시됨",
+      "manual_action": "수동 검토",
+      "builtin_action": "후보",
+      "apply_success_toast": "진화를 적용했습니다",
+      "apply_failed_toast": "진화를 적용하지 못했습니다",
+      "scope": {
+        "personal_agent": "에이전트",
+        "workspace_skill": "스킬",
+        "builtin_skill_candidate": "내장 후보"
+      },
+      "risk": {
+        "safe": "안전",
+        "review": "검토",
+        "manual": "수동"
+      },
+      "status": {
+        "pending": "대기 중",
+        "applied": "적용됨",
+        "dismissed": "무시됨"
+      }
     },
     "integrations": {
       "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",

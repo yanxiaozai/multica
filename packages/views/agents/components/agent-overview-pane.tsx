@@ -5,6 +5,7 @@ import {
   Activity,
   BookCheck,
   BookOpenText,
+  Brain,
   FileText,
   KeyRound,
   ListTodo,
@@ -33,6 +34,7 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SpecProfileTab } from "./tabs/spec-profile-tab";
 import { SkillsTab } from "./tabs/skills-tab";
+import { LearningTab } from "./tabs/learning-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
@@ -47,18 +49,20 @@ export type DetailTab =
   | "instructions"
   | "spec_profile"
   | "skills"
+  | "learning"
   | "env"
   | "custom_args"
   | "mcp_config"
   | "integrations"
   | "runtime_config";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "spec_profile" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "spec_profile" | "skills" | "learning" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
   spec_profile: "spec_profile",
   skills: "skills",
+  learning: "learning",
   env: "environment",
   custom_args: "custom_args",
   mcp_config: "mcp_config",
@@ -75,6 +79,7 @@ const detailTabs: {
   { id: "instructions", icon: FileText },
   { id: "spec_profile", icon: BookCheck },
   { id: "skills", icon: BookOpenText },
+  { id: "learning", icon: Brain },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
   { id: "mcp_config", icon: Plug },
@@ -86,6 +91,7 @@ interface AgentOverviewPaneProps {
   agent: Agent;
   runtimes: AgentRuntime[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  canEdit: boolean;
   /**
    * One-shot request from a sibling (the inspector's compact Lark status
    * row) to focus a specific tab. Routed through the same `requestTabChange`
@@ -123,6 +129,7 @@ export function AgentOverviewPane({
   agent,
   runtimes,
   onUpdate,
+  canEdit,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -272,6 +279,15 @@ export function AgentOverviewPane({
         {effectiveTab === "skills" && (
           <TabContent>
             <SkillsTab agent={agent} />
+          </TabContent>
+        )}
+        {effectiveTab === "learning" && (
+          <TabContent>
+            <LearningTab
+              agent={agent}
+              canEdit={canEdit}
+              onUpdate={onUpdate}
+            />
           </TabContent>
         )}
         {effectiveTab === "env" && (

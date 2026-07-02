@@ -200,6 +200,7 @@
     "instructions": "指示",
     "spec_profile": "Spec Profile",
     "skills": "スキル",
+    "learning": "学習",
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
@@ -378,6 +379,44 @@
       "add_dialog_confirm_other": "スキル {{count}} 件を追加",
       "add_dialog_cancel": "キャンセル",
       "add_failed_toast": "スキルを追加できませんでした"
+    },
+    "learning": {
+      "auto_title": "安全なエージェント学習を自動適用",
+      "auto_hint": "Learning Report が安全な個別エージェント改善を提案した場合、Multica はこのエージェントの指示へ自動で追加できます。スキルと手動レビューの提案は引き続き確認が必要です。",
+      "auto_enabled_toast": "自動進化を有効にしました",
+      "auto_disabled_toast": "自動進化を無効にしました",
+      "reports_title": "Learning Reports",
+      "reports_hint": "保留中の提案 {{count}} 件",
+      "refresh": "更新",
+      "empty_title": "Learning Report はまだありません",
+      "empty_hint": "完了した issue 作業から、このエージェントが学んだことや改善できる指示・スキルが記録されると、ここに表示されます。",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "提案 {{count}} 件",
+      "no_suggestions": "このレポートには提案がありません。",
+      "suggestion_fallback": "進化提案",
+      "apply_agent_action": "エージェントを進化",
+      "apply_skill_action": "スキルを更新",
+      "applied_action": "適用済み",
+      "dismissed_action": "却下済み",
+      "manual_action": "手動レビュー",
+      "builtin_action": "候補",
+      "apply_success_toast": "進化を適用しました",
+      "apply_failed_toast": "進化を適用できませんでした",
+      "scope": {
+        "personal_agent": "エージェント",
+        "workspace_skill": "スキル",
+        "builtin_skill_candidate": "組み込み候補"
+      },
+      "risk": {
+        "safe": "安全",
+        "review": "レビュー",
+        "manual": "手動"
+      },
+      "status": {
+        "pending": "保留中",
+        "applied": "適用済み",
+        "dismissed": "却下済み"
+      }
     },
     "integrations": {
       "intro": "このエージェントを外部のチャットプラットフォームに接続し、普段使っているツールから直接やり取りできるようにします。",

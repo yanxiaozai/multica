@@ -216,6 +216,7 @@
     "instructions": "Instructions",
     "spec_profile": "Spec Profile",
     "skills": "Skills",
+    "learning": "Learning",
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
@@ -402,6 +403,44 @@
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "learning": {
+      "auto_title": "Auto-evolve safe agent learnings",
+      "auto_hint": "When a Learning Report proposes a safe personal-agent improvement, Multica can append it to this agent's instructions automatically. Skill and manual suggestions still need review.",
+      "auto_enabled_toast": "Auto evolution enabled",
+      "auto_disabled_toast": "Auto evolution disabled",
+      "reports_title": "Learning Reports",
+      "reports_hint": "{{count}} pending suggestion(s)",
+      "refresh": "Refresh",
+      "empty_title": "No Learning Reports yet",
+      "empty_hint": "Reports appear after completed issue work records what this agent learned and which instructions or skills could improve.",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "{{count}} suggestion(s)",
+      "no_suggestions": "No suggestions in this report.",
+      "suggestion_fallback": "Evolution suggestion",
+      "apply_agent_action": "Evolve agent",
+      "apply_skill_action": "Update skill",
+      "applied_action": "Applied",
+      "dismissed_action": "Dismissed",
+      "manual_action": "Manual review",
+      "builtin_action": "Candidate",
+      "apply_success_toast": "Evolution applied",
+      "apply_failed_toast": "Failed to apply evolution",
+      "scope": {
+        "personal_agent": "Agent",
+        "workspace_skill": "Skill",
+        "builtin_skill_candidate": "Builtin candidate"
+      },
+      "risk": {
+        "safe": "Safe",
+        "review": "Review",
+        "manual": "Manual"
+      },
+      "status": {
+        "pending": "Pending",
+        "applied": "Applied",
+        "dismissed": "Dismissed"
+      }
     },
     "integrations": {
       "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
