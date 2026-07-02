@@ -746,6 +746,13 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				<-readerDone
 			}
 
+			// Codex app-server can spawn MCP/tool subprocesses that outlive
+			// the app-server itself while staying in this process group. Once
+			// stdout is drained, we are done with the session; send a final
+			// group kill before Wait reaps the leader so those descendants do
+			// not stay behind as orphaned chrome-devtools-mcp/npm processes.
+			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+
 			// Phase 2: bound cmd.Wait() in case the process is still alive
 			// (scanner-overflow case: reader exited early on its own while
 			// codex stayed blocked writing into a full stdout pipe).
