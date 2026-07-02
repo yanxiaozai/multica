@@ -402,6 +402,126 @@ func (h *Handler) ListIssueLearningReports(w http.ResponseWriter, r *http.Reques
 	h.writeLearningReportList(w, r, issue.WorkspaceID, reports)
 }
 
+func (h *Handler) GenerateIssueLearningReport(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return
+	}
+
+	tasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load issue tasks")
+		return
+	}
+	agentID, taskID, ok := issueLearningAgentAndTask(issue, tasks)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "issue has no agent task or agent assignee to learn from")
+		return
+	}
+	agentRow, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	report, err := qtx.CreateAgentLearningReport(r.Context(), db.CreateAgentLearningReportParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+		TaskID:      taskID,
+		AgentID:     agentID,
+		Summary:     issueLearningSummary(issue, tasks),
+		Metadata: jsonMetadataBytes(map[string]any{
+			"source":           "manual_issue_learning",
+			"issue_status":     issue.Status,
+			"issue_identifier": issueIdentifierForLearning(issue),
+			"task_count":       len(tasks),
+			"latest_task_id":   uuidToString(taskID),
+		}),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create learning report")
+		return
+	}
+
+	suggestion, ok := h.createAgentEvolutionSuggestionFromRequest(w, r, qtx, issue.WorkspaceID, report.ID, CreateAgentEvolutionSuggestionRequest{
+		Scope:           agentLearningScopePersonalAgent,
+		Risk:            agentLearningRiskSafe,
+		TargetID:        uuidToString(agentID),
+		Title:           "Capture learning before handoff",
+		Rationale:       "This issue's implementation can be complete even when the issue close flow does not run. The agent should preserve lessons before final handoff.",
+		ProposedContent: "When issue work is complete but the issue has not gone through a close or done workflow, generate a Learning Report before the final handoff so useful workflow lessons and evolution suggestions are preserved.",
+		Metadata: map[string]any{
+			"source":   "manual_issue_learning",
+			"issue_id": uuidToString(issue.ID),
+		},
+	})
+	if !ok {
+		return
+	}
+	if shouldAutoApplyEvolutionSuggestion(agentRow, suggestion) {
+		if _, err := h.applyEvolutionSuggestionInTx(w, r, qtx, member, suggestion); err != nil {
+			if errors.Is(err, errAgentEvolutionResponseWritten) {
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to auto-apply evolution suggestion")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit learning report")
+		return
+	}
+
+	resp, err := h.learningReportWithSuggestions(r, issue.WorkspaceID, report)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load learning report")
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func issueLearningAgentAndTask(issue db.Issue, tasks []db.AgentTaskQueue) (pgtype.UUID, pgtype.UUID, bool) {
+	if len(tasks) > 0 {
+		return tasks[0].AgentID, tasks[0].ID, true
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		return issue.AssigneeID, pgtype.UUID{}, true
+	}
+	return pgtype.UUID{}, pgtype.UUID{}, false
+}
+
+func issueLearningSummary(issue db.Issue, tasks []db.AgentTaskQueue) string {
+	identifier := issueIdentifierForLearning(issue)
+	if len(tasks) == 0 {
+		return fmt.Sprintf("Manual learning report for %s. The issue is currently %s and has no recorded agent task; preserve the workflow lesson explicitly.", identifier, issue.Status)
+	}
+	latest := tasks[0]
+	return fmt.Sprintf("Manual learning report for %s. The issue is currently %s; the latest agent task is %s.", identifier, issue.Status, latest.Status)
+}
+
+func issueIdentifierForLearning(issue db.Issue) string {
+	if issue.Number > 0 {
+		return fmt.Sprintf("#%d %s", issue.Number, issue.Title)
+	}
+	return issue.Title
+}
+
 func (h *Handler) ListAgentLearningReports(w http.ResponseWriter, r *http.Request) {
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {

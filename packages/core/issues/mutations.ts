@@ -9,6 +9,7 @@ import {
   type MyIssuesFilter,
 } from "./queries";
 import { projectKeys } from "../projects/queries";
+import { agentLearningKeys } from "../agents/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -384,6 +385,18 @@ export function useUpdateIssue() {
       if (ctx?.parentId || newParentId) {
         qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
       }
+    },
+  });
+}
+
+export function useGenerateIssueLearningReport() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (issueId: string) => api.generateIssueLearningReport(issueId),
+    onSuccess: (report, issueId) => {
+      qc.invalidateQueries({ queryKey: [...issueKeys.detail(wsId, issueId), "learning-reports"] });
+      qc.invalidateQueries({ queryKey: agentLearningKeys.reports(wsId, report.agent_id) });
     },
   });
 }

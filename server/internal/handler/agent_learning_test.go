@@ -142,6 +142,86 @@ func TestCreateAgentLearningReportAndListByIssueAndAgent(t *testing.T) {
 	}
 }
 
+func TestGenerateIssueLearningReportFromLatestTask(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Manual Learning Agent", []byte(`{}`))
+	issueID := createHandlerTestLearningIssue(t, agentID)
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/learning-report?workspace_id="+testWorkspaceID, nil), "id", issueID)
+	testHandler.GenerateIssueLearningReport(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("GenerateIssueLearningReport: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var report AgentLearningReportResponse
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode generated learning report: %v", err)
+	}
+	if report.AgentID != agentID {
+		t.Fatalf("report agent = %q, want %q", report.AgentID, agentID)
+	}
+	if report.IssueID == nil || *report.IssueID != issueID {
+		t.Fatalf("report issue = %v, want %q", report.IssueID, issueID)
+	}
+	if report.TaskID == nil || *report.TaskID != taskID {
+		t.Fatalf("report task = %v, want %q", report.TaskID, taskID)
+	}
+	if len(report.Suggestions) != 1 {
+		t.Fatalf("expected one generated suggestion, got %d", len(report.Suggestions))
+	}
+	if got := report.Suggestions[0].Scope; got != "personal_agent" {
+		t.Fatalf("suggestion scope = %q, want personal_agent", got)
+	}
+	if got := report.Suggestions[0].Risk; got != "safe" {
+		t.Fatalf("suggestion risk = %q, want safe", got)
+	}
+}
+
+func TestGenerateIssueLearningReportUsesAgentAssigneeWithoutTask(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Manual Learning Assignee", []byte(`{}`))
+	issueID := createHandlerTestLearningIssue(t, agentID)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/learning-report?workspace_id="+testWorkspaceID, nil), "id", issueID)
+	testHandler.GenerateIssueLearningReport(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("GenerateIssueLearningReport: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var report AgentLearningReportResponse
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode generated learning report: %v", err)
+	}
+	if report.AgentID != agentID {
+		t.Fatalf("report agent = %q, want %q", report.AgentID, agentID)
+	}
+	if report.TaskID != nil {
+		t.Fatalf("report task = %v, want nil", report.TaskID)
+	}
+}
+
+func TestGenerateIssueLearningReportRejectsIssueWithoutAgent(t *testing.T) {
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, 'No agent learning issue')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create unassigned issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/learning-report?workspace_id="+testWorkspaceID, nil), "id", issueID)
+	testHandler.GenerateIssueLearningReport(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("GenerateIssueLearningReport: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestApplyAgentEvolutionSuggestionPersonalAgent(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Agent Evolution Target", []byte(`{}`))
 	proposed := "Before editing files, check whether the issue names a specific workspace skill."

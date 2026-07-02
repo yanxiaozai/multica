@@ -959,6 +959,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/spec/state", h.UpdateIssueSpecState)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Get("/learning-reports", h.ListIssueLearningReports)
+					r.Post("/learning-report", h.GenerateIssueLearningReport)
 				})
 			})
 

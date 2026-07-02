@@ -2061,6 +2061,15 @@ export class ApiClient {
     });
   }
 
+  async generateIssueLearningReport(issueId: string): Promise<AgentLearningReport> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/learning-report`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, AgentLearningReportSchema, EMPTY_AGENT_LEARNING_REPORT, {
+      endpoint: "POST /api/issues/:id/learning-report",
+    });
+  }
+
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
