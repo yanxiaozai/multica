@@ -22,29 +22,73 @@ type ActivityLog struct {
 }
 
 type Agent struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	Name               string             `json:"name"`
-	AvatarUrl          pgtype.Text        `json:"avatar_url"`
-	RuntimeMode        string             `json:"runtime_mode"`
-	RuntimeConfig      []byte             `json:"runtime_config"`
-	Visibility         string             `json:"visibility"`
-	Status             string             `json:"status"`
-	MaxConcurrentTasks int32              `json:"max_concurrent_tasks"`
-	OwnerID            pgtype.UUID        `json:"owner_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Description        string             `json:"description"`
-	RuntimeID          pgtype.UUID        `json:"runtime_id"`
-	Instructions       string             `json:"instructions"`
-	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
-	ArchivedBy         pgtype.UUID        `json:"archived_by"`
-	CustomEnv          []byte             `json:"custom_env"`
-	CustomArgs         []byte             `json:"custom_args"`
-	McpConfig          []byte             `json:"mcp_config"`
-	Model              pgtype.Text        `json:"model"`
-	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
-	SpecProfile        []byte             `json:"spec_profile"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	Name                  string             `json:"name"`
+	AvatarUrl             pgtype.Text        `json:"avatar_url"`
+	RuntimeMode           string             `json:"runtime_mode"`
+	RuntimeConfig         []byte             `json:"runtime_config"`
+	Visibility            string             `json:"visibility"`
+	Status                string             `json:"status"`
+	MaxConcurrentTasks    int32              `json:"max_concurrent_tasks"`
+	OwnerID               pgtype.UUID        `json:"owner_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Description           string             `json:"description"`
+	RuntimeID             pgtype.UUID        `json:"runtime_id"`
+	Instructions          string             `json:"instructions"`
+	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy            pgtype.UUID        `json:"archived_by"`
+	CustomEnv             []byte             `json:"custom_env"`
+	CustomArgs            []byte             `json:"custom_args"`
+	McpConfig             []byte             `json:"mcp_config"`
+	Model                 pgtype.Text        `json:"model"`
+	ThinkingLevel         pgtype.Text        `json:"thinking_level"`
+	SpecProfile           []byte             `json:"spec_profile"`
+	AgentEvolutionEnabled bool               `json:"agent_evolution_enabled"`
+}
+
+type AgentEvolutionApplication struct {
+	ID            pgtype.UUID        `json:"id"`
+	SuggestionID  pgtype.UUID        `json:"suggestion_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AppliedBy     pgtype.UUID        `json:"applied_by"`
+	TargetType    string             `json:"target_type"`
+	TargetID      pgtype.UUID        `json:"target_id"`
+	BeforeContent string             `json:"before_content"`
+	AfterContent  string             `json:"after_content"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentEvolutionSuggestion struct {
+	ID              pgtype.UUID        `json:"id"`
+	ReportID        pgtype.UUID        `json:"report_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Scope           string             `json:"scope"`
+	Risk            string             `json:"risk"`
+	Status          string             `json:"status"`
+	TargetType      string             `json:"target_type"`
+	TargetID        pgtype.UUID        `json:"target_id"`
+	Title           string             `json:"title"`
+	Rationale       string             `json:"rationale"`
+	ProposedContent string             `json:"proposed_content"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	AppliedAt       pgtype.Timestamptz `json:"applied_at"`
+	DismissedAt     pgtype.Timestamptz `json:"dismissed_at"`
+}
+
+type AgentLearningReport struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	Summary     string             `json:"summary"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AgentRuntime struct {

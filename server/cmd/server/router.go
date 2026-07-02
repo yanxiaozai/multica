@@ -958,6 +958,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/spec/mapping", h.UpdateIssueSpecMapping)
 					r.Put("/spec/state", h.UpdateIssueSpecState)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/learning-reports", h.ListIssueLearningReports)
 				})
 			})
 
@@ -1098,6 +1099,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
+					r.Get("/learning-reports", h.ListAgentLearningReports)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
 					r.Post("/skills/add", h.AddAgentSkills)
@@ -1108,6 +1110,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
 				})
+			})
+
+			// Agent learning / evolution
+			r.Route("/api/agent-learning-reports", func(r chi.Router) {
+				r.Post("/", h.CreateAgentLearningReport)
+				r.Get("/{id}", h.GetAgentLearningReport)
+			})
+			r.Route("/api/agent-evolution-suggestions", func(r chi.Router) {
+				r.Post("/{id}/apply", h.ApplyAgentEvolutionSuggestion)
 			})
 
 			// Agent templates catalog (browse + detail). The Create flow

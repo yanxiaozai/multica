@@ -61,13 +61,14 @@ type AgentResponse struct {
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
-	ThinkingLevel string              `json:"thinking_level"`
-	OwnerID       *string             `json:"owner_id"`
-	Skills        []AgentSkillSummary `json:"skills"`
-	CreatedAt     string              `json:"created_at"`
-	UpdatedAt     string              `json:"updated_at"`
-	ArchivedAt    *string             `json:"archived_at"`
-	ArchivedBy    *string             `json:"archived_by"`
+	ThinkingLevel         string              `json:"thinking_level"`
+	AgentEvolutionEnabled bool                `json:"agent_evolution_enabled"`
+	OwnerID               *string             `json:"owner_id"`
+	Skills                []AgentSkillSummary `json:"skills"`
+	CreatedAt             string              `json:"created_at"`
+	UpdatedAt             string              `json:"updated_at"`
+	ArchivedAt            *string             `json:"archived_at"`
+	ArchivedBy            *string             `json:"archived_by"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -120,31 +121,32 @@ func agentToResponse(a db.Agent) AgentResponse {
 	specProfile := jsonObjectResponse(a.SpecProfile)
 
 	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
-		Name:               a.Name,
-		Description:        a.Description,
-		Instructions:       a.Instructions,
-		SpecProfile:        specProfile,
-		AvatarURL:          textToPtr(a.AvatarUrl),
-		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
-		CustomArgs:         customArgs,
-		McpConfig:          mcpConfig,
-		HasCustomEnv:       envKeyCount > 0,
-		CustomEnvKeyCount:  envKeyCount,
-		Visibility:         a.Visibility,
-		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		Model:              a.Model.String,
-		ThinkingLevel:      a.ThinkingLevel.String,
-		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []AgentSkillSummary{},
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		ID:                    uuidToString(a.ID),
+		WorkspaceID:           uuidToString(a.WorkspaceID),
+		RuntimeID:             uuidToString(a.RuntimeID),
+		Name:                  a.Name,
+		Description:           a.Description,
+		Instructions:          a.Instructions,
+		SpecProfile:           specProfile,
+		AvatarURL:             textToPtr(a.AvatarUrl),
+		RuntimeMode:           a.RuntimeMode,
+		RuntimeConfig:         rc,
+		CustomArgs:            customArgs,
+		McpConfig:             mcpConfig,
+		HasCustomEnv:          envKeyCount > 0,
+		CustomEnvKeyCount:     envKeyCount,
+		Visibility:            a.Visibility,
+		Status:                a.Status,
+		MaxConcurrentTasks:    a.MaxConcurrentTasks,
+		Model:                 a.Model.String,
+		ThinkingLevel:         a.ThinkingLevel.String,
+		AgentEvolutionEnabled: a.AgentEvolutionEnabled,
+		OwnerID:               uuidToPtr(a.OwnerID),
+		Skills:                []AgentSkillSummary{},
+		CreatedAt:             timestampToString(a.CreatedAt),
+		UpdatedAt:             timestampToString(a.UpdatedAt),
+		ArchivedAt:            timestampToPtr(a.ArchivedAt),
+		ArchivedBy:            uuidToPtr(a.ArchivedBy),
 	}
 }
 
@@ -955,6 +957,10 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+	// AgentEvolutionEnabled allows safe personal_agent suggestions created by
+	// Learning Reports to apply automatically. Review/manual and workspace
+	// skill suggestions remain button-driven.
+	AgentEvolutionEnabled *bool `json:"agent_evolution_enabled"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1184,6 +1190,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// receiving an obvious foreign model ID (e.g. Claude Code -> Codex).
 		// Unknown/custom model strings are preserved by the helper.
 		params.Model = pgtype.Text{String: "", Valid: true}
+	}
+	if req.AgentEvolutionEnabled != nil {
+		params.AgentEvolutionEnabled = pgtype.Bool{Bool: *req.AgentEvolutionEnabled, Valid: true}
 	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
