@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -1499,7 +1500,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 
 	if hasAgentOrSquadMention(mentions) {
-		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		return h.resolveMentionedAgentCommentTriggers(ctx, issue, content, mentions, actorType, actorID, opts)
 	}
 	if hasMemberMention(mentions) {
 		return nil
@@ -1576,6 +1577,75 @@ func hasAgentOrSquadMention(mentions []util.Mention) bool {
 func hasMemberMention(mentions []util.Mention) bool {
 	for _, m := range mentions {
 		if m.Type == "member" {
+			return true
+		}
+	}
+	return false
+}
+
+func mentionOnlyAppearsAsFutureBoundaryReference(content string, mention util.Mention) bool {
+	matches := util.MentionRe.FindAllStringSubmatchIndex(content, -1)
+	found := false
+	for _, match := range matches {
+		if len(match) < 8 || match[4] < 0 || match[5] < 0 || match[6] < 0 || match[7] < 0 {
+			continue
+		}
+		if content[match[4]:match[5]] != mention.Type || content[match[6]:match[7]] != mention.ID {
+			continue
+		}
+		found = true
+		if !isFutureBoundaryReferenceContext(content, match[0], match[1]) {
+			return false
+		}
+	}
+	return found
+}
+
+func isFutureBoundaryReferenceContext(content string, mentionStart int, mentionEnd int) bool {
+	prefix := localMentionContextBefore(content, mentionStart, 80)
+	suffix := localMentionContextAfter(content, mentionEnd, 48)
+
+	advisory := containsAny(prefix, []string{"建议", "明确", "后续", "之后", "后面", "计划", "later", "next"})
+	boundary := containsAny(suffix, []string{"边界", "范围", "handoff", "交接", "负责范围"})
+	futureHandoff := containsAny(prefix, []string{"下一步", "后续", "之后", "后面", "later", "next"}) &&
+		containsAny(prefix, []string{"交给", "交由"})
+
+	return (advisory && boundary) || (advisory && futureHandoff)
+}
+
+func localMentionContextBefore(content string, end int, limit int) string {
+	start := end
+	for start > 0 && end-start < limit {
+		r, size := utf8.DecodeLastRuneInString(content[:start])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		if strings.ContainsRune("。！？\n\r", r) {
+			break
+		}
+		start -= size
+	}
+	return strings.ToLower(content[start:end])
+}
+
+func localMentionContextAfter(content string, start int, limit int) string {
+	end := start
+	for end < len(content) && end-start < limit {
+		r, size := utf8.DecodeRuneInString(content[end:])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		if strings.ContainsRune("。！？\n\r", r) {
+			break
+		}
+		end += size
+	}
+	return strings.ToLower(content[start:end])
+}
+
+func containsAny(s string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
 			return true
 		}
 	}
@@ -1802,7 +1872,7 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, mentions []util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
+func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, mentions []util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
 	wsID := uuidToString(issue.WorkspaceID)
 	triggers := make([]commentAgentTrigger, 0, len(mentions))
 	seen := make(map[string]struct{}, len(mentions))
@@ -1816,6 +1886,9 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	}
 	for _, m := range mentions {
 		if m.Type == "squad" {
+			if mentionOnlyAppearsAsFutureBoundaryReference(content, m) {
+				continue
+			}
 			// @squad mention → trigger the squad's leader agent.
 			squadUUID := parseUUID(m.ID)
 			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
@@ -1854,6 +1927,9 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		if m.Type != "agent" {
+			continue
+		}
+		if mentionOnlyAppearsAsFutureBoundaryReference(content, m) {
 			continue
 		}
 		agentUUID := parseUUID(m.ID)

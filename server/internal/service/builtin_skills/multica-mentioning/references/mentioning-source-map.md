@@ -36,6 +36,7 @@ a pointer.
 | Comment edit re-triggering also runs `triggerTasksForComment` after cancelling old tasks for the edited comment | `server/internal/handler/comment.go:1577-1594` |
 | `squad` branch: resolve squad in workspace, read `LeaderID`, add the leader trigger | `server/internal/handler/comment.go:1397-1435` |
 | `squad` → shared enqueue helper calls `EnqueueTaskForSquadLeader` | `server/internal/handler/comment.go:1141-1147` |
+| Future-boundary references are skipped before resolving `agent` / `squad` triggers. The filter checks the concrete mention occurrence's local sentence context, so a plain "delegate this now" mention still fires while "明确下一步交给 @X 的实现边界" does not. | `server/internal/handler/comment.go:1608-1663`, `server/internal/handler/comment_trigger_preview_test.go:390-419` |
 | Everything not `agent` after the squad branch is skipped: `if m.Type != "agent" { continue }` | `server/internal/handler/comment.go:1437-1439` |
 | `agent` branch: load agent in workspace, then add the agent trigger | `server/internal/handler/comment.go:1440-1464` |
 | `agent` → shared enqueue helper calls `EnqueueTaskForMention` (a run for that agent) | `server/internal/handler/comment.go:1148-1154` |

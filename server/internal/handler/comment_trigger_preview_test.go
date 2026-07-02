@@ -389,6 +389,35 @@ func TestPreviewCommentTriggers_ReturnsMentionedAgentsAndSuppressFiltersCreate(t
 	}
 }
 
+func TestPreviewCommentTriggers_FutureImplementationBoundaryMentionDoesNotQueue(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	designAgentID := createHandlerTestAgent(t, "Future Boundary Design Agent", nil)
+	implementationAgentID := createHandlerTestAgent(t, "Future Boundary Implementation Agent", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "future implementation boundary mention", "", "")
+	content := fmt.Sprintf(
+		"[@Design](mention://agent/%s) 请先接这个 issue 的设计门禁。建议写入 design.md，并明确下一步交给 [@Implementation](mention://agent/%s) 的实现边界。",
+		designAgentID,
+		implementationAgentID,
+	)
+
+	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content})
+	requirePreviewAgents(t, preview, designAgentID)
+	if preview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+		t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionAgent)
+	}
+
+	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content})
+	if got := countQueuedCommentTriggerTasks(t, issueID, designAgentID); got != 1 {
+		t.Fatalf("design agent queued tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, implementationAgentID); got != 0 {
+		t.Fatalf("future implementation boundary mention queued tasks = %d, want 0", got)
+	}
+}
+
 func TestPreviewCommentTriggers_ExplicitMentionSuppressesAssigneeFallback(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

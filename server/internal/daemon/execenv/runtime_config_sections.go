@@ -431,7 +431,7 @@ func writeMentions(b *strings.Builder) {
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **notifies a human**\n")
 	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
 	b.WriteString("### When NOT to use a mention link\n\n")
-	b.WriteString("Default: NO mention. Replying to another agent that just spoke to you, or thanking / acknowledging / signing off — **end with no mention at all**. An accidental `@mention` restarts an agent-to-agent loop and costs the user money.\n\n")
+	b.WriteString("Default: NO mention. Replying to another agent that just spoke to you, describing a future handoff / implementation boundary / next phase owner, or thanking / acknowledging / signing off — **end with no mention at all** unless that agent should start now. An accidental `@mention` restarts an agent-to-agent loop and costs the user money.\n\n")
 	b.WriteString("### When a mention IS appropriate\n\n")
 	b.WriteString("Escalating to a human owner not yet involved; delegating a concrete new sub-task to another agent for the first time; or when the user explicitly asks to loop someone in. Otherwise **don't mention**. Silence ends conversations.\n\n")
 }
