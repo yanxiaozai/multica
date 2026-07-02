@@ -158,7 +158,7 @@
     "import_button": "내 issue 가져오기",
     "importing": "가져오는 중…",
     "toast_imported_other": "{{count}}개 issue를 가져왔습니다",
-    "toast_import_partial": "가져옴 {{imported}}, 건너뜀 {{skipped}}, 실패 {{failed}}",
+    "toast_import_partial": "가져옴 {{imported}}, 업데이트 {{updated}}, 건너뜀 {{skipped}}, 실패 {{failed}}",
     "toast_import_failed": "GitLab issue 가져오기 실패: {{error}}",
     "toast_connect_failed": "GitLab 프로젝트 연결 실패: {{error}}",
     "configure_hint": "GitLab 프로젝트를 연결하여 나에게 할당된 issue를 가져옵니다.",

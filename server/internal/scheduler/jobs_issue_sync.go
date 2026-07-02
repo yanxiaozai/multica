@@ -21,6 +21,7 @@ type IssueSyncRunner interface {
 type IssueSyncStats struct {
 	Configs    int
 	Imported   int
+	Updated    int
 	Skipped    int
 	Failed     int
 	ErrConfigs int
@@ -67,13 +68,14 @@ func makeIssueSyncPollHandler(runner IssueSyncRunner) Handler {
 		return HandlerResult{
 			// RowsAffected folds imported + skipped into one "work done"
 			// counter for the audit row; per-issue detail lives in Result.
-			RowsAffected: int64(stats.Imported + stats.Skipped),
+			RowsAffected: int64(stats.Imported + stats.Updated + stats.Skipped),
 			Result: map[string]any{
-				"configs":         stats.Configs,
-				"imported":        stats.Imported,
-				"skipped":         stats.Skipped,
-				"failed":          stats.Failed,
-				"error_configs":   stats.ErrConfigs,
+				"configs":       stats.Configs,
+				"imported":      stats.Imported,
+				"updated":       stats.Updated,
+				"skipped":       stats.Skipped,
+				"failed":        stats.Failed,
+				"error_configs": stats.ErrConfigs,
 			},
 		}, nil
 	}

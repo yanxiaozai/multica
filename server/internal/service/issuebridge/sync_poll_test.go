@@ -66,6 +66,12 @@ func (q *pollTestQueries) CreateIssueBridgeItem(_ context.Context, arg db.Create
 	q.createdItems = append(q.createdItems, arg)
 	return db.IssueBridgeItem{}, nil
 }
+func (q *pollTestQueries) UpdateIssueBridgeItemRemote(context.Context, db.UpdateIssueBridgeItemRemoteParams) (db.IssueBridgeItem, error) {
+	return db.IssueBridgeItem{}, nil
+}
+func (q *pollTestQueries) UpdateIssueStatus(context.Context, db.UpdateIssueStatusParams) (db.Issue, error) {
+	return db.Issue{}, nil
+}
 func (q *pollTestQueries) GetAgent(_ context.Context, id pgtype.UUID) (db.Agent, error) {
 	return db.Agent{ID: id}, nil
 }

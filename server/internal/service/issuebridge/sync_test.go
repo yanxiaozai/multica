@@ -22,9 +22,11 @@ type syncTestQueries struct {
 	syncConfigErr error
 	integration   db.IssueIntegration
 	// Dedup state: keyed by remote_iid, value = whether it already exists.
-	existing map[int64]bool
+	existing map[int64]db.IssueBridgeItem
 	// Records
 	createdBridgeItems []db.CreateIssueBridgeItemParams
+	updatedStatuses    []db.UpdateIssueStatusParams
+	updatedBridgeItems []db.UpdateIssueBridgeItemRemoteParams
 }
 
 func (q *syncTestQueries) GetIssueSyncConfigByScope(_ context.Context, _ db.GetIssueSyncConfigByScopeParams) (db.IssueSyncConfig, error) {
@@ -34,14 +36,25 @@ func (q *syncTestQueries) GetIssueIntegrationInWorkspace(context.Context, db.Get
 	return q.integration, nil
 }
 func (q *syncTestQueries) GetIssueBridgeItemByRemote(_ context.Context, arg db.GetIssueBridgeItemByRemoteParams) (db.IssueBridgeItem, error) {
-	if q.existing[arg.RemoteIid] {
-		return db.IssueBridgeItem{IssueID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}}, nil
+	if item, ok := q.existing[arg.RemoteIid]; ok {
+		if !item.IssueID.Valid {
+			item.IssueID = pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+		}
+		return item, nil
 	}
 	return db.IssueBridgeItem{}, pgx.ErrNoRows
 }
 func (q *syncTestQueries) CreateIssueBridgeItem(_ context.Context, arg db.CreateIssueBridgeItemParams) (db.IssueBridgeItem, error) {
 	q.createdBridgeItems = append(q.createdBridgeItems, arg)
 	return db.IssueBridgeItem{}, nil
+}
+func (q *syncTestQueries) UpdateIssueBridgeItemRemote(_ context.Context, arg db.UpdateIssueBridgeItemRemoteParams) (db.IssueBridgeItem, error) {
+	q.updatedBridgeItems = append(q.updatedBridgeItems, arg)
+	return db.IssueBridgeItem{}, nil
+}
+func (q *syncTestQueries) UpdateIssueStatus(_ context.Context, arg db.UpdateIssueStatusParams) (db.Issue, error) {
+	q.updatedStatuses = append(q.updatedStatuses, arg)
+	return db.Issue{ID: arg.ID, WorkspaceID: arg.WorkspaceID, Status: arg.Status}, nil
 }
 func (q *syncTestQueries) GetAgent(_ context.Context, id pgtype.UUID) (db.Agent, error) {
 	return db.Agent{ID: id}, nil
@@ -207,7 +220,7 @@ func TestImportProjectIssues_CreatesNewIssuesWithStateMapping(t *testing.T) {
 			AutoAssignEnabled: false,
 		},
 		integration: seedIntegration(wsID, integID),
-		existing:    map[int64]bool{},
+		existing:    map[int64]db.IssueBridgeItem{},
 	}
 	q.integration.EncryptedToken = sealedToken("tok")
 	creator := &fakeIssueCreator{}
@@ -254,16 +267,26 @@ func TestImportProjectIssues_SkipsAlreadyMapped(t *testing.T) {
 	wsID := testUUID(10)
 	projectID := testUUID(11)
 	integID := testUUID(12)
+	remoteUpdatedAt := time.Now()
 
 	q := &syncTestQueries{
 		syncConfig:  db.IssueSyncConfig{ID: testUUID(13), WorkspaceID: wsID, IntegrationID: integID, ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p", StateMapping: []byte(`{"opened":"backlog","closed":"done"}`)},
 		integration: seedIntegration(wsID, integID),
-		existing:    map[int64]bool{7: true}, // iid 7 already imported
+		existing: map[int64]db.IssueBridgeItem{7: {
+			ID:               testUUID(15),
+			WorkspaceID:      wsID,
+			IssueID:          testUUID(16),
+			IntegrationID:    integID,
+			RemoteProjectRef: "g/p",
+			RemoteIid:        7,
+			RemoteUrl:        "https://gitlab.example.com/g/p/-/issues/7",
+			RemoteUpdatedAt:  pgtype.Timestamptz{Time: remoteUpdatedAt, Valid: true},
+		}}, // iid 7 already imported and unchanged
 	}
 	q.integration.EncryptedToken = sealedToken("tok")
 	creator := &fakeIssueCreator{}
 	client := &fakeGitLabClient{issues: []GitLabIssue{
-		{IID: 7, Title: "already here", State: "opened"},
+		{IID: 7, Title: "already here", State: "opened", WebURL: "https://gitlab.example.com/g/p/-/issues/7", UpdatedAt: remoteUpdatedAt},
 		{IID: 8, Title: "new", State: "opened"},
 	}}
 	svc := newSyncService(q, creator, client)
@@ -277,6 +300,76 @@ func TestImportProjectIssues_SkipsAlreadyMapped(t *testing.T) {
 	}
 	if len(creator.calls) != 1 || creator.calls[0].Title != "new" {
 		t.Fatalf("expected only the new issue created, got %+v", creator.calls)
+	}
+}
+
+func TestImportProjectIssues_UpdatesAlreadyMappedStatusWhenRemoteChanged(t *testing.T) {
+	ctx := context.Background()
+	wsID := testUUID(15)
+	projectID := testUUID(16)
+	integID := testUUID(17)
+	itemID := testUUID(18)
+	issueID := testUUID(19)
+	oldRemoteUpdatedAt := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	newRemoteUpdatedAt := oldRemoteUpdatedAt.Add(2 * time.Hour)
+
+	q := &syncTestQueries{
+		syncConfig: db.IssueSyncConfig{
+			ID:               testUUID(20),
+			WorkspaceID:      wsID,
+			IntegrationID:    integID,
+			ScopeType:        "project",
+			ScopeID:          projectID,
+			RemoteProjectRef: "g/p",
+			StateMapping:     []byte(`{"opened":"todo","closed":"done"}`),
+		},
+		integration: seedIntegration(wsID, integID),
+		existing: map[int64]db.IssueBridgeItem{7: {
+			ID:               itemID,
+			WorkspaceID:      wsID,
+			IssueID:          issueID,
+			IntegrationID:    integID,
+			RemoteProjectRef: "g/p",
+			RemoteIid:        7,
+			RemoteUrl:        "https://gitlab.example.com/g/p/-/issues/7",
+			RemoteUpdatedAt:  pgtype.Timestamptz{Time: oldRemoteUpdatedAt, Valid: true},
+		}},
+	}
+	q.integration.EncryptedToken = sealedToken("tok")
+	creator := &fakeIssueCreator{}
+	client := &fakeGitLabClient{issues: []GitLabIssue{{
+		IID:       7,
+		Title:     "closed upstream",
+		State:     "closed",
+		WebURL:    "https://gitlab.example.com/g/p/-/issues/7",
+		UpdatedAt: newRemoteUpdatedAt,
+	}}}
+	svc := newSyncService(q, creator, client)
+
+	res, err := svc.ImportProjectIssues(ctx, wsID, projectID, testUUID(21), ImportOpts{AssignedToMe: true, State: "all"})
+	if err != nil {
+		t.Fatalf("ImportProjectIssues: %v", err)
+	}
+	if res.Imported != 0 || res.Updated != 1 || res.Skipped != 0 || res.Failed != 0 {
+		t.Fatalf("unexpected tallies: %+v", res)
+	}
+	if len(creator.calls) != 0 {
+		t.Fatalf("existing mapped issue should not create a duplicate, got %+v", creator.calls)
+	}
+	if len(q.updatedStatuses) != 1 {
+		t.Fatalf("expected one local status update, got %+v", q.updatedStatuses)
+	}
+	if got := q.updatedStatuses[0].Status; got != "done" {
+		t.Fatalf("updated status = %q, want done", got)
+	}
+	if q.updatedStatuses[0].ID != issueID || q.updatedStatuses[0].WorkspaceID != wsID {
+		t.Fatalf("status update target = %+v, want issue %v workspace %v", q.updatedStatuses[0], issueID, wsID)
+	}
+	if len(q.updatedBridgeItems) != 1 {
+		t.Fatalf("expected one bridge watermark update, got %+v", q.updatedBridgeItems)
+	}
+	if q.updatedBridgeItems[0].ID != itemID || !q.updatedBridgeItems[0].RemoteUpdatedAt.Time.Equal(newRemoteUpdatedAt) {
+		t.Fatalf("bridge update = %+v, want id %v remote_updated_at %v", q.updatedBridgeItems[0], itemID, newRemoteUpdatedAt)
 	}
 }
 
@@ -296,7 +389,7 @@ func TestImportProjectIssues_AutoAssignStampsAgent(t *testing.T) {
 			DefaultAssigneeID: agentID,
 		},
 		integration: seedIntegration(wsID, integID),
-		existing:    map[int64]bool{},
+		existing:    map[int64]db.IssueBridgeItem{},
 	}
 	q.integration.EncryptedToken = sealedToken("tok")
 	creator := &fakeIssueCreator{}
@@ -335,7 +428,7 @@ func TestImportProjectIssues_PartialCreateFailureContinues(t *testing.T) {
 	q := &syncTestQueries{
 		syncConfig:  db.IssueSyncConfig{ID: testUUID(43), WorkspaceID: wsID, IntegrationID: integID, ScopeType: "project", ScopeID: projectID, RemoteProjectRef: "g/p", StateMapping: []byte(`{"opened":"backlog","closed":"done"}`)},
 		integration: seedIntegration(wsID, integID),
-		existing:    map[int64]bool{},
+		existing:    map[int64]db.IssueBridgeItem{},
 	}
 	q.integration.EncryptedToken = sealedToken("tok")
 	// First create fails, second succeeds — the batch must continue past

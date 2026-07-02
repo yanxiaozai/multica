@@ -197,10 +197,11 @@ export function ProjectGitLabSyncSection({ projectId }: { projectId: string }) {
   const handleImport = async () => {
     try {
       const result = await importIssues.mutateAsync(projectId);
-      if (result.failed > 0 || result.skipped > 0) {
+      if (result.failed > 0 || result.skipped > 0 || result.updated > 0) {
         toast.message(
           t(($) => $.gitlab_sync.toast_import_partial, {
             imported: result.imported,
+            updated: result.updated,
             skipped: result.skipped,
             failed: result.failed,
           }),

@@ -33,6 +33,7 @@ type ImportOpts struct {
 // ImportResult tallies one import pass.
 type ImportResult struct {
 	Imported int // newly created local issues
+	Updated  int // existing mapped local issues refreshed from GitLab
 	Skipped  int // already mapped (idempotent re-run)
 	Failed   int // per-issue errors; collected, non-fatal
 	Errors   []string
@@ -109,12 +110,20 @@ func (s *Service) ImportProjectIssues(
 	stateMap := decodeStateMapping(cfg.StateMapping)
 	result := ImportResult{}
 	for _, ri := range remoteIssues {
-		// Idempotency: skip GitLab issues we already imported.
 		if existing, lookupErr := s.Queries.GetIssueBridgeItemByRemote(ctx, db.GetIssueBridgeItemByRemoteParams{
 			IntegrationID: cfg.IntegrationID,
 			RemoteIid:     ri.IID,
 		}); lookupErr == nil && existing.IssueID.Valid {
-			result.Skipped++
+			updated, syncErr := s.syncExistingMappedIssue(ctx, existing, cfg, ri, stateMap)
+			if syncErr != nil {
+				result.failed(fmt.Sprintf("iid %d: sync existing issue: %v", ri.IID, syncErr))
+				continue
+			}
+			if updated {
+				result.Updated++
+			} else {
+				result.Skipped++
+			}
 			continue
 		} else if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
 			result.failed(fmt.Sprintf("iid %d: dedup lookup: %v", ri.IID, lookupErr))
@@ -174,6 +183,43 @@ func (s *Service) ImportProjectIssues(
 		result.Imported++
 	}
 	return result, nil
+}
+
+func (s *Service) syncExistingMappedIssue(ctx context.Context, item db.IssueBridgeItem, cfg db.IssueSyncConfig, remote GitLabIssue, stateMap map[string]string) (bool, error) {
+	if !shouldRefreshMappedIssue(item, cfg, remote) {
+		return false, nil
+	}
+	status := mapRemoteState(stateMap, remote.State)
+	if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          item.IssueID,
+		WorkspaceID: item.WorkspaceID,
+		Status:      status,
+	}); err != nil {
+		return false, fmt.Errorf("update local status: %w", err)
+	}
+	if _, err := s.Queries.UpdateIssueBridgeItemRemote(ctx, db.UpdateIssueBridgeItemRemoteParams{
+		ID:               item.ID,
+		WorkspaceID:      item.WorkspaceID,
+		RemoteProjectRef: cfg.RemoteProjectRef,
+		RemoteUrl:        remote.WebURL,
+		RemoteUpdatedAt:  pgTimestamp(remote.UpdatedAt),
+	}); err != nil {
+		return false, fmt.Errorf("update remote watermark: %w", err)
+	}
+	return true, nil
+}
+
+func shouldRefreshMappedIssue(item db.IssueBridgeItem, cfg db.IssueSyncConfig, remote GitLabIssue) bool {
+	if item.RemoteProjectRef != cfg.RemoteProjectRef || item.RemoteUrl != remote.WebURL {
+		return true
+	}
+	if !item.RemoteUpdatedAt.Valid {
+		return true
+	}
+	if remote.UpdatedAt.IsZero() {
+		return false
+	}
+	return remote.UpdatedAt.After(item.RemoteUpdatedAt.Time)
 }
 
 func (s *Service) autoAcceptProjectIssues(ctx context.Context, cfg db.IssueSyncConfig) (ImportResult, error) {
@@ -450,6 +496,7 @@ func pgTimestamp(t time.Time) pgtype.Timestamptz {
 type PollStats struct {
 	Configs    int // due configs processed
 	Imported   int // total issues created across all configs
+	Updated    int // existing mapped issues refreshed across all configs
 	Skipped    int // already-mapped issues skipped
 	Failed     int // per-issue failures across all configs
 	ErrConfigs int // configs whose whole poll errored (marked failure)
@@ -518,6 +565,7 @@ func (s *Service) SyncDueConfigs(ctx context.Context) (PollStats, error) {
 		}
 
 		stats.Imported += result.Imported
+		stats.Updated += result.Updated
 		stats.Skipped += result.Skipped
 		stats.Failed += result.Failed
 		if _, markErr := s.Queries.MarkIssueSyncPollSuccess(ctx, cfg.ID); markErr != nil {

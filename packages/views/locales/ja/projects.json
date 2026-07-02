@@ -158,7 +158,7 @@
     "import_button": "自分の issue をインポート",
     "importing": "インポート中…",
     "toast_imported_other": "{{count}} 件の issue をインポートしました",
-    "toast_import_partial": "インポート {{imported}}、スキップ {{skipped}}、失敗 {{failed}}",
+    "toast_import_partial": "インポート {{imported}}、更新 {{updated}}、スキップ {{skipped}}、失敗 {{failed}}",
     "toast_import_failed": "GitLab issue のインポートに失敗しました：{{error}}",
     "toast_connect_failed": "GitLab プロジェクトの連携に失敗しました：{{error}}",
     "configure_hint": "GitLab プロジェクトを連携して、自分に割り当てられた issue をインポートします。",

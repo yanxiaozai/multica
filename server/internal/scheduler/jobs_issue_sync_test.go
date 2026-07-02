@@ -21,7 +21,7 @@ func (f *fakeIssueSyncRunner) SyncDueConfigs(context.Context) (IssueSyncStats, e
 
 func TestIssueSyncPollJobHandlerReturnsStats(t *testing.T) {
 	runner := &fakeIssueSyncRunner{stats: IssueSyncStats{
-		Configs: 2, Imported: 5, Skipped: 1, Failed: 0, ErrConfigs: 0,
+		Configs: 2, Imported: 5, Updated: 2, Skipped: 1, Failed: 0, ErrConfigs: 0,
 	}}
 	job := IssueSyncPollJob(runner)
 
@@ -43,11 +43,14 @@ func TestIssueSyncPollJobHandlerReturnsStats(t *testing.T) {
 	if runner.called != 1 {
 		t.Errorf("runner called %d times, want 1", runner.called)
 	}
-	if res.RowsAffected != 6 { // imported(5) + skipped(1)
-		t.Errorf("RowsAffected = %d, want 6", res.RowsAffected)
+	if res.RowsAffected != 8 { // imported(5) + updated(2) + skipped(1)
+		t.Errorf("RowsAffected = %d, want 8", res.RowsAffected)
 	}
 	if v, _ := res.Result["imported"].(int); v != 5 {
 		t.Errorf("Result.imported = %v, want 5", res.Result["imported"])
+	}
+	if v, _ := res.Result["updated"].(int); v != 2 {
+		t.Errorf("Result.updated = %v, want 2", res.Result["updated"])
 	}
 }
 

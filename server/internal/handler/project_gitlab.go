@@ -5,13 +5,14 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/internal/service/issuebridge"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // ImportProjectGitLabIssuesResponse tallies a one-shot GitLab import.
 type ImportProjectGitLabIssuesResponse struct {
 	Imported int      `json:"imported"`
+	Updated  int      `json:"updated"`
 	Skipped  int      `json:"skipped"`
 	Failed   int      `json:"failed"`
 	Errors   []string `json:"errors,omitempty"`
@@ -74,6 +75,7 @@ func (h *Handler) ImportProjectGitLabIssues(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusOK, ImportProjectGitLabIssuesResponse{
 		Imported: result.Imported,
+		Updated:  result.Updated,
 		Skipped:  result.Skipped,
 		Failed:   result.Failed,
 		Errors:   result.Errors,

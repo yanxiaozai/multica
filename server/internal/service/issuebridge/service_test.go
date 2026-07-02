@@ -343,6 +343,14 @@ func (f *fakeQueries) CreateIssueBridgeItem(context.Context, db.CreateIssueBridg
 	return db.IssueBridgeItem{}, errors.New("not implemented")
 }
 
+func (f *fakeQueries) UpdateIssueBridgeItemRemote(context.Context, db.UpdateIssueBridgeItemRemoteParams) (db.IssueBridgeItem, error) {
+	return db.IssueBridgeItem{}, errors.New("not implemented")
+}
+
+func (f *fakeQueries) UpdateIssueStatus(context.Context, db.UpdateIssueStatusParams) (db.Issue, error) {
+	return db.Issue{}, errors.New("not implemented")
+}
+
 func (f *fakeQueries) GetAgent(context.Context, pgtype.UUID) (db.Agent, error) {
 	return db.Agent{}, errors.New("not implemented")
 }

@@ -161,7 +161,7 @@
     "importing": "Importing…",
     "toast_imported_one": "Imported {{count}} issue",
     "toast_imported_other": "Imported {{count}} issues",
-    "toast_import_partial": "Imported {{imported}}, skipped {{skipped}}, failed {{failed}}",
+    "toast_import_partial": "Imported {{imported}}, updated {{updated}}, skipped {{skipped}}, failed {{failed}}",
     "toast_import_failed": "Failed to import GitLab issues: {{error}}",
     "toast_connect_failed": "Failed to link GitLab project: {{error}}",
     "configure_hint": "Link a GitLab project to import its issues assigned to you.",

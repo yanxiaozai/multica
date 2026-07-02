@@ -114,6 +114,17 @@ INSERT INTO issue_bridge_item (
 )
 RETURNING *;
 
+-- name: UpdateIssueBridgeItemRemote :one
+-- Refreshes the remote-side watermark after an already-imported GitLab issue
+-- has been reconciled into its local issue row.
+UPDATE issue_bridge_item
+SET remote_project_ref = $3,
+    remote_url = $4,
+    remote_updated_at = $5,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- name: ListDueIssueSyncConfigs :many
 -- Picks sync configs whose poll is due now: enabled, and either never polled
 -- or past their effective interval. The effective interval falls back to the

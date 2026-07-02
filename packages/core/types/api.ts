@@ -228,6 +228,7 @@ export interface ListIssueIntegrationsResponse {
 /** Tallies returned by POST /api/projects/:id/gitlab/import-issues. */
 export interface ProjectGitLabImportResult {
   imported: number;
+  updated: number;
   skipped: number;
   failed: number;
   errors?: string[];

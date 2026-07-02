@@ -158,7 +158,7 @@
     "import_button": "导入我的 issue",
     "importing": "导入中…",
     "toast_imported_other": "已导入 {{count}} 个 issue",
-    "toast_import_partial": "已导入 {{imported}}，跳过 {{skipped}}，失败 {{failed}}",
+    "toast_import_partial": "已导入 {{imported}}，已更新 {{updated}}，跳过 {{skipped}}，失败 {{failed}}",
     "toast_import_failed": "导入 GitLab issue 失败：{{error}}",
     "toast_connect_failed": "关联 GitLab 项目失败：{{error}}",
     "configure_hint": "关联一个 GitLab 项目，导入其中指派给你的 issue。",

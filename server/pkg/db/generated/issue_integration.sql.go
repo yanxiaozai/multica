@@ -57,6 +57,50 @@ func (q *Queries) CreateIssueBridgeItem(ctx context.Context, arg CreateIssueBrid
 	return i, err
 }
 
+const updateIssueBridgeItemRemote = `-- name: UpdateIssueBridgeItemRemote :one
+UPDATE issue_bridge_item
+SET remote_project_ref = $3,
+    remote_url = $4,
+    remote_updated_at = $5,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url, remote_updated_at, created_at, updated_at
+`
+
+type UpdateIssueBridgeItemRemoteParams struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RemoteProjectRef string             `json:"remote_project_ref"`
+	RemoteUrl        string             `json:"remote_url"`
+	RemoteUpdatedAt  pgtype.Timestamptz `json:"remote_updated_at"`
+}
+
+// Refreshes the remote-side watermark after an already-imported GitLab issue
+// has been reconciled into its local issue row.
+func (q *Queries) UpdateIssueBridgeItemRemote(ctx context.Context, arg UpdateIssueBridgeItemRemoteParams) (IssueBridgeItem, error) {
+	row := q.db.QueryRow(ctx, updateIssueBridgeItemRemote,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.RemoteProjectRef,
+		arg.RemoteUrl,
+		arg.RemoteUpdatedAt,
+	)
+	var i IssueBridgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.IntegrationID,
+		&i.RemoteProjectRef,
+		&i.RemoteIid,
+		&i.RemoteUrl,
+		&i.RemoteUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createIssueIntegration = `-- name: CreateIssueIntegration :one
 INSERT INTO issue_integration (
     workspace_id, provider, name, base_url, encrypted_token,
@@ -215,20 +259,21 @@ func (q *Queries) DeleteIssueSyncConfig(ctx context.Context, arg DeleteIssueSync
 	return id, err
 }
 
-const getIssueBridgeItemByRemote = `-- name: GetIssueBridgeItemByRemote :one
+const getIssueBridgeItemByIssue = `-- name: GetIssueBridgeItemByIssue :one
 SELECT id, workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url, remote_updated_at, created_at, updated_at FROM issue_bridge_item
-WHERE integration_id = $1 AND remote_iid = $2
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY updated_at DESC, created_at DESC
+LIMIT 1
 `
 
-type GetIssueBridgeItemByRemoteParams struct {
-	IntegrationID pgtype.UUID `json:"integration_id"`
-	RemoteIid     int64       `json:"remote_iid"`
+type GetIssueBridgeItemByIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
 }
 
-// Idempotency lookup: has this GitLab issue (integration + iid) already been
-// imported? The UNIQUE(integration_id, remote_iid) constraint backs this.
-func (q *Queries) GetIssueBridgeItemByRemote(ctx context.Context, arg GetIssueBridgeItemByRemoteParams) (IssueBridgeItem, error) {
-	row := q.db.QueryRow(ctx, getIssueBridgeItemByRemote, arg.IntegrationID, arg.RemoteIid)
+// Loads the external GitLab issue mapping for a Multica issue when present.
+func (q *Queries) GetIssueBridgeItemByIssue(ctx context.Context, arg GetIssueBridgeItemByIssueParams) (IssueBridgeItem, error) {
+	row := q.db.QueryRow(ctx, getIssueBridgeItemByIssue, arg.WorkspaceID, arg.IssueID)
 	var i IssueBridgeItem
 	err := row.Scan(
 		&i.ID,
@@ -245,21 +290,20 @@ func (q *Queries) GetIssueBridgeItemByRemote(ctx context.Context, arg GetIssueBr
 	return i, err
 }
 
-const getIssueBridgeItemByIssue = `-- name: GetIssueBridgeItemByIssue :one
+const getIssueBridgeItemByRemote = `-- name: GetIssueBridgeItemByRemote :one
 SELECT id, workspace_id, issue_id, integration_id, remote_project_ref, remote_iid, remote_url, remote_updated_at, created_at, updated_at FROM issue_bridge_item
-WHERE workspace_id = $1 AND issue_id = $2
-ORDER BY updated_at DESC, created_at DESC
-LIMIT 1
+WHERE integration_id = $1 AND remote_iid = $2
 `
 
-type GetIssueBridgeItemByIssueParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	IssueID     pgtype.UUID `json:"issue_id"`
+type GetIssueBridgeItemByRemoteParams struct {
+	IntegrationID pgtype.UUID `json:"integration_id"`
+	RemoteIid     int64       `json:"remote_iid"`
 }
 
-// Loads the external GitLab issue mapping for a Multica issue when present.
-func (q *Queries) GetIssueBridgeItemByIssue(ctx context.Context, arg GetIssueBridgeItemByIssueParams) (IssueBridgeItem, error) {
-	row := q.db.QueryRow(ctx, getIssueBridgeItemByIssue, arg.WorkspaceID, arg.IssueID)
+// Idempotency lookup: has this GitLab issue (integration + iid) already been
+// imported? The UNIQUE(integration_id, remote_iid) constraint backs this.
+func (q *Queries) GetIssueBridgeItemByRemote(ctx context.Context, arg GetIssueBridgeItemByRemoteParams) (IssueBridgeItem, error) {
+	row := q.db.QueryRow(ctx, getIssueBridgeItemByRemote, arg.IntegrationID, arg.RemoteIid)
 	var i IssueBridgeItem
 	err := row.Scan(
 		&i.ID,

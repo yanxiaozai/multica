@@ -36,6 +36,8 @@ type Queries interface {
 	GetIssueSyncConfigByScope(context.Context, db.GetIssueSyncConfigByScopeParams) (db.IssueSyncConfig, error)
 	GetIssueBridgeItemByRemote(context.Context, db.GetIssueBridgeItemByRemoteParams) (db.IssueBridgeItem, error)
 	CreateIssueBridgeItem(context.Context, db.CreateIssueBridgeItemParams) (db.IssueBridgeItem, error)
+	UpdateIssueBridgeItemRemote(context.Context, db.UpdateIssueBridgeItemRemoteParams) (db.IssueBridgeItem, error)
+	UpdateIssueStatus(context.Context, db.UpdateIssueStatusParams) (db.Issue, error)
 	GetAgent(context.Context, pgtype.UUID) (db.Agent, error)
 	GetSquadInWorkspace(context.Context, db.GetSquadInWorkspaceParams) (db.Squad, error)
 	// Polling path (Phase B): pick due configs + record poll watermarks.
