@@ -147,6 +147,9 @@ import type {
   CreateBillingPortalSessionResponse,
   CreateSpecDecisionRequest,
   CreateSpecDecisionResponse,
+  AppendIssueDraftMessageRequest,
+  CreateIssueDraftRequest,
+  IssueDraftBundle,
   ListSpecDocumentsResponse,
   ListSpecEpicsResponse,
   ListSpecModulesResponse,
@@ -203,6 +206,7 @@ import {
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_INTEGRATION,
   EMPTY_ISSUE_SYNC_CONFIG,
+  EMPTY_ISSUE_DRAFT_BUNDLE,
   EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE,
   EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -222,6 +226,8 @@ import {
   SquadInstructionsGenerationJobSchema,
   GroupedIssuesResponseSchema,
   IssueIntegrationResponseSchema,
+  IssueDraftBundleSchema,
+  IssueDraftMessageSchema,
   IssueSyncConfigResponseSchema,
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
@@ -698,6 +704,68 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async createIssueDraft(data: CreateIssueDraftRequest): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts",
+    }) as IssueDraftBundle;
+  }
+
+  async getIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}`);
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "GET /api/issue-drafts/:id",
+    }) as IssueDraftBundle;
+  }
+
+  async appendIssueDraftMessage(
+    id: string,
+    data: AppendIssueDraftMessageRequest,
+  ): Promise<IssueDraftBundle["messages"][number]> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = raw && typeof raw === "object" && "message" in raw
+      ? (raw as { message?: unknown }).message
+      : raw;
+    return parseWithFallback(
+      parsed,
+      IssueDraftMessageSchema,
+      EMPTY_ISSUE_DRAFT_BUNDLE.messages[0] ?? {
+        id: "",
+        session_id: "",
+        workspace_id: "",
+        author_type: "",
+        author_id: null,
+        message_type: "",
+        content: "",
+        metadata: {},
+        created_at: "",
+      },
+      { endpoint: "POST /api/issue-drafts/:id/messages" },
+    ) as IssueDraftBundle["messages"][number];
+  }
+
+  async delegateIssueDraft(id: string): Promise<void> {
+    await this.fetch(`/api/issue-drafts/${id}/delegate`, { method: "POST" });
+  }
+
+  async generateIssueDraft(id: string): Promise<void> {
+    await this.fetch(`/api/issue-drafts/${id}/generate`, { method: "POST" });
+  }
+
+  async confirmIssueDraft(id: string): Promise<void> {
+    await this.fetch(`/api/issue-drafts/${id}/confirm`, { method: "POST" });
+  }
+
+  async cancelIssueDraft(id: string): Promise<void> {
+    await this.fetch(`/api/issue-drafts/${id}/cancel`, { method: "POST" });
   }
 
   async createFeedback(data: {

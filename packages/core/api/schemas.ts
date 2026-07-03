@@ -18,6 +18,7 @@ import type {
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   GenerateSquadInstructionsResponse,
+  IssueDraftBundle,
   SquadInstructionsGenerationJob,
   IssueIntegration,
   IssueSyncConfig,
@@ -216,6 +217,110 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
+};
+
+const LooseRecordSchema = z.record(z.string(), z.unknown()).default({});
+
+export const IssueDraftSessionSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  project_id: z.string().default(""),
+  squad_id: z.string().default(""),
+  leader_agent_id: z.string().default(""),
+  primary_project_resource_id: z.string().default(""),
+  primary_local_path_snapshot: z.string().default(""),
+  status: z.string().default("clarifying"),
+  created_by: z.string().default(""),
+  created_issue_id: z.string().nullable().optional().default(null),
+  remote_issue_url: z.string().default(""),
+  spec_file_path: z.string().default(""),
+  git_commit_sha: z.string().default(""),
+  last_error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftMessageSchema = z.object({
+  id: z.string().default(""),
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  author_type: z.string().default(""),
+  author_id: z.string().nullable().optional().default(null),
+  message_type: z.string().default(""),
+  content: z.string().default(""),
+  metadata: LooseRecordSchema,
+  created_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftMemberTaskSchema = z.object({
+  id: z.string().default(""),
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  task_id: z.string().nullable().optional().default(null),
+  status: z.string().default(""),
+  skill_basis: z.string().default(""),
+  read_scope: LooseRecordSchema,
+  findings: z.string().default(""),
+  error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftArtifactSchema = z.object({
+  id: z.string().default(""),
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  artifact_type: z.string().default(""),
+  revision: z.number().default(0),
+  content: z.string().default(""),
+  generated_by_agent_id: z.string().nullable().optional().default(null),
+  created_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftConfirmStepSchema = z.object({
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  step: z.string().default(""),
+  status: z.string().default(""),
+  external_id: z.string().default(""),
+  result_metadata: LooseRecordSchema,
+  error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftBundleSchema = z.object({
+  session: IssueDraftSessionSchema,
+  messages: z.array(IssueDraftMessageSchema).default([]),
+  member_tasks: z.array(IssueDraftMemberTaskSchema).default([]),
+  artifacts: z.array(IssueDraftArtifactSchema).default([]),
+  confirm_steps: z.array(IssueDraftConfirmStepSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_BUNDLE: IssueDraftBundle = {
+  session: {
+    id: "",
+    workspace_id: "",
+    project_id: "",
+    squad_id: "",
+    leader_agent_id: "",
+    primary_project_resource_id: "",
+    primary_local_path_snapshot: "",
+    status: "clarifying",
+    created_by: "",
+    created_issue_id: null,
+    remote_issue_url: "",
+    spec_file_path: "",
+    git_commit_sha: "",
+    last_error: "",
+    created_at: "",
+    updated_at: "",
+  },
+  messages: [],
+  member_tasks: [],
+  artifacts: [],
+  confirm_steps: [],
 };
 
 export const CommentSchema = z.object({

@@ -1,5 +1,16 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
 export type {
+  AppendIssueDraftMessageRequest,
+  CreateIssueDraftRequest,
+  IssueDraftArtifact,
+  IssueDraftBundle,
+  IssueDraftConfirmStep,
+  IssueDraftMemberTask,
+  IssueDraftMessage,
+  IssueDraftSession,
+  IssueDraftStatus,
+} from "./issue-draft";
+export type {
   Agent,
   AgentStatus,
   AgentRuntimeMode,
