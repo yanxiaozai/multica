@@ -555,6 +555,75 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueDraftArtifact struct {
+	ID                 pgtype.UUID        `json:"id"`
+	SessionID          pgtype.UUID        `json:"session_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ArtifactType       string             `json:"artifact_type"`
+	Revision           int32              `json:"revision"`
+	Content            string             `json:"content"`
+	GeneratedByAgentID pgtype.UUID        `json:"generated_by_agent_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type IssueDraftConfirmStep struct {
+	SessionID      pgtype.UUID        `json:"session_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Step           string             `json:"step"`
+	Status         string             `json:"status"`
+	ExternalID     string             `json:"external_id"`
+	ResultMetadata []byte             `json:"result_metadata"`
+	Error          string             `json:"error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueDraftMemberTask struct {
+	ID          pgtype.UUID        `json:"id"`
+	SessionID   pgtype.UUID        `json:"session_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	Status      string             `json:"status"`
+	SkillBasis  string             `json:"skill_basis"`
+	ReadScope   []byte             `json:"read_scope"`
+	Findings    string             `json:"findings"`
+	Error       string             `json:"error"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueDraftMessage struct {
+	ID          pgtype.UUID        `json:"id"`
+	SessionID   pgtype.UUID        `json:"session_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	MessageType string             `json:"message_type"`
+	Content     string             `json:"content"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type IssueDraftSession struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	SquadID                  pgtype.UUID        `json:"squad_id"`
+	LeaderAgentID            pgtype.UUID        `json:"leader_agent_id"`
+	PrimaryProjectResourceID pgtype.UUID        `json:"primary_project_resource_id"`
+	PrimaryLocalPathSnapshot string             `json:"primary_local_path_snapshot"`
+	Status                   string             `json:"status"`
+	CreatedBy                pgtype.UUID        `json:"created_by"`
+	CreatedIssueID           pgtype.UUID        `json:"created_issue_id"`
+	RemoteIssueUrl           string             `json:"remote_issue_url"`
+	SpecFilePath             string             `json:"spec_file_path"`
+	GitCommitSha             string             `json:"git_commit_sha"`
+	LastError                string             `json:"last_error"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueIntegration struct {
 	ID                         pgtype.UUID        `json:"id"`
 	WorkspaceID                pgtype.UUID        `json:"workspace_id"`
