@@ -48,6 +48,9 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useCreateIssueDraft, useAppendIssueDraftMessage, useDelegateIssueDraft, useGenerateIssueDraft, useConfirmIssueDraft } from "@multica/core/issue-drafts/mutations";
+import { issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
+import { squadListOptions } from "@multica/core/workspace/queries";
 import {
   api,
   ApiError,
@@ -56,6 +59,7 @@ import {
   parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
 import { IssuePickerModal } from "./issue-picker-modal";
@@ -244,6 +248,8 @@ export function ManualCreatePanel({
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
+  const [issueDraftId, setIssueDraftId] = useState<string | null>(null);
+  const [issueDraftReply, setIssueDraftReply] = useState("");
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
@@ -251,6 +257,7 @@ export function ManualCreatePanel({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   // Sibling stages under the chosen parent, so the Stage picker can offer the
   // already-used max stage (and one beyond) instead of flooring at Stage 1–3.
   const { data: parentChildren = [] } = useQuery({
@@ -303,6 +310,19 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const createIssueDraftMutation = useCreateIssueDraft();
+  const appendIssueDraftMessage = useAppendIssueDraftMessage(issueDraftId ?? "");
+  const delegateIssueDraft = useDelegateIssueDraft(issueDraftId ?? "");
+  const generateIssueDraft = useGenerateIssueDraft(issueDraftId ?? "");
+  const confirmIssueDraft = useConfirmIssueDraft(issueDraftId ?? "");
+  const { data: issueDraftBundle } = useQuery({
+    ...issueDraftQueryOptions(wsId, issueDraftId ?? ""),
+    enabled: !!issueDraftId,
+  });
+  const selectedSquad = squads.find((s) => s.id === assigneeId);
+  const canStartIssueDraft = Boolean(
+    title.trim() && projectId && assigneeType === "squad" && assigneeId,
+  );
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -478,6 +498,25 @@ export function ManualCreatePanel({
     }
   };
 
+  const startIssueDraft = async () => {
+    if (!canStartIssueDraft || !projectId || !assigneeId) return;
+    const description = descEditorRef.current?.getMarkdown()?.trim() ?? "";
+    const initialMessage = [title.trim(), description].filter(Boolean).join("\n\n");
+    const bundle = await createIssueDraftMutation.mutateAsync({
+      project_id: projectId,
+      squad_id: assigneeId,
+      initial_message: initialMessage,
+    });
+    setIssueDraftId(bundle.session.id);
+    toast.success("Issue draft session started");
+  };
+
+  const appendIssueDraftReply = async () => {
+    if (!issueDraftId || !issueDraftReply.trim()) return;
+    await appendIssueDraftMessage.mutateAsync({ content: issueDraftReply.trim() });
+    setIssueDraftReply("");
+  };
+
   // Switch to agent mode. Hand the typed text up to the shell as the carry
   // payload; the shell stores it as the next panel's `data` so the agent
   // panel reads `data.prompt` on mount. Concatenate title + description so
@@ -596,6 +635,101 @@ export function ManualCreatePanel({
               />
               {descDragOver && <FileDropOverlay />}
             </div>
+
+            {(assigneeType === "squad" || issueDraftBundle) && (
+              <div className="mx-5 mb-2 shrink-0 rounded-md border bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">
+                      Squad issue draft
+                      {selectedSquad ? ` · ${selectedSquad.name}` : ""}
+                    </div>
+                    <div className="truncate text-[0.6875rem] text-muted-foreground">
+                      详细计划写入目标项目 .spec；远端 issue 只保留简版内容。
+                    </div>
+                  </div>
+                  {!issueDraftBundle ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={startIssueDraft}
+                      disabled={!canStartIssueDraft || createIssueDraftMutation.isPending}
+                    >
+                      Start
+                    </Button>
+                  ) : (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => delegateIssueDraft.mutateAsync()}
+                        disabled={!issueDraftId || delegateIssueDraft.isPending}
+                      >
+                        Delegate
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => generateIssueDraft.mutateAsync()}
+                        disabled={!issueDraftId || generateIssueDraft.isPending}
+                      >
+                        Generate
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => confirmIssueDraft.mutateAsync()}
+                        disabled={!issueDraftId || confirmIssueDraft.isPending}
+                      >
+                        Confirm
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                {issueDraftBundle && (
+                  <div className="mt-3 grid gap-2">
+                    <div className="max-h-24 overflow-y-auto rounded border bg-background/70 px-2 py-1.5 text-xs">
+                      {issueDraftBundle.messages.length === 0 ? (
+                        <p className="text-muted-foreground">No messages yet.</p>
+                      ) : (
+                        issueDraftBundle.messages.slice(-4).map((msg) => (
+                          <div key={msg.id} className="py-1">
+                            <span className="font-medium">{msg.author_type}</span>
+                            <span className="text-muted-foreground"> · {msg.message_type}</span>
+                            <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{msg.content}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {issueDraftBundle.artifacts.length > 0 && (
+                      <div className="grid gap-1 text-[0.6875rem] text-muted-foreground">
+                        {issueDraftBundle.artifacts.slice(0, 3).map((artifact) => (
+                          <div key={artifact.id} className="flex items-center justify-between gap-2">
+                            <span>{artifact.artifact_type} v{artifact.revision}</span>
+                            <span className="truncate">{artifact.content.split("\n")[0]}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Textarea
+                        value={issueDraftReply}
+                        onChange={(e) => setIssueDraftReply(e.target.value)}
+                        placeholder="Reply to the squad..."
+                        className="min-h-9 text-xs"
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={appendIssueDraftReply}
+                        disabled={!issueDraftReply.trim() || appendIssueDraftMessage.isPending}
+                      >
+                        Send
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
