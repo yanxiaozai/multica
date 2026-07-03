@@ -669,9 +669,9 @@ export function ManualCreatePanel({
                         size="sm"
                         variant="secondary"
                         onClick={() => delegateIssueDraft.mutateAsync()}
-                        disabled={!issueDraftId || delegateIssueDraft.isPending}
+                        disabled={!issueDraftId || delegateIssueDraft.isPending || !!activeIssueDraftTask}
                       >
-                        Delegate
+                        {activeIssueDraftTask || delegateIssueDraft.isPending ? "Delegating" : "Delegate"}
                       </Button>
                       <Button
                         size="sm"
