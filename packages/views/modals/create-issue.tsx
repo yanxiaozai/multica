@@ -319,6 +319,10 @@ export function ManualCreatePanel({
   const { data: issueDraftBundle } = useQuery({
     ...issueDraftQueryOptions(wsId, issueDraftId ?? ""),
     enabled: !!issueDraftId,
+    refetchInterval: (query) =>
+      query.state.data?.member_tasks.some((task) => task.status === "queued" || task.status === "running")
+        ? 2000
+        : false,
   });
   const selectedSquad = squads.find((s) => s.id === assigneeId);
   const selectedSquadId =

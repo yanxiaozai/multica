@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service/issuedraft"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1386,6 +1387,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
 	s.markSquadInstructionsGenerationRunning(ctx, task)
+	s.markIssueDraftMemberTaskRunning(ctx, task)
 	s.promoteIssueTodoToInProgress(ctx, task)
 	// Tell every connected workspace WS client that this task transitioned
 	// (dispatched | waiting_local_directory) → running. Without this, the
@@ -1589,6 +1591,13 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
 
+	if draft, ok := s.parseIssueDraftContext(task); ok {
+		s.completeIssueDraftMemberTask(ctx, task, draft, result)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+		return &task, nil
+	}
+
 	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
 		s.completeSquadInstructionsGenerationTask(ctx, task, gen, result)
 		s.ReconcileAgentStatus(ctx, task.AgentID)
@@ -1788,6 +1797,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
 		s.failSquadInstructionsGenerationTask(ctx, task, gen, errMsg)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+		return &task, nil
+	}
+
+	if draft, ok := s.parseIssueDraftContext(task); ok {
+		s.failIssueDraftMemberTask(ctx, task, draft, errMsg)
 		s.ReconcileAgentStatus(ctx, task.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
 		return &task, nil
@@ -2765,6 +2781,174 @@ func (s *TaskService) parseIssueDraftContext(task db.AgentTaskQueue) (IssueDraft
 		return IssueDraftContext{}, false
 	}
 	return draft, true
+}
+
+func issueDraftContextIDs(task db.AgentTaskQueue, draft IssueDraftContext) (sessionID, workspaceID, memberTaskID pgtype.UUID, ok bool) {
+	sessionID, err := util.ParseUUID(draft.SessionID)
+	if err != nil {
+		slog.Warn("invalid issue draft session id",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	workspaceID, err = util.ParseUUID(draft.WorkspaceID)
+	if err != nil {
+		slog.Warn("invalid issue draft workspace id",
+			"task_id", util.UUIDToString(task.ID),
+			"workspace_id", draft.WorkspaceID,
+			"error", err,
+		)
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	memberTaskID, err = util.ParseUUID(draft.MemberTaskID)
+	if err != nil {
+		slog.Warn("invalid issue draft member task id",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	return sessionID, workspaceID, memberTaskID, true
+}
+
+func issueDraftTaskMetadata(task db.AgentTaskQueue) []byte {
+	metadata, err := json.Marshal(map[string]string{
+		"task_id":  util.UUIDToString(task.ID),
+		"agent_id": util.UUIDToString(task.AgentID),
+	})
+	if err != nil {
+		return nil
+	}
+	return metadata
+}
+
+func (s *TaskService) markIssueDraftMemberTaskRunning(ctx context.Context, task db.AgentTaskQueue) {
+	draft, ok := s.parseIssueDraftContext(task)
+	if !ok {
+		return
+	}
+	_, workspaceID, memberTaskID, ok := issueDraftContextIDs(task, draft)
+	if !ok {
+		return
+	}
+	if _, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+		ID:          memberTaskID,
+		WorkspaceID: workspaceID,
+		Status:      "running",
+		Findings:    "",
+		Error:       "",
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft member task running",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) completeIssueDraftMemberTask(ctx context.Context, task db.AgentTaskQueue, draft IssueDraftContext, result []byte) {
+	sessionID, workspaceID, memberTaskID, ok := issueDraftContextIDs(task, draft)
+	if !ok {
+		return
+	}
+	body := taskCompletedOutput(result)
+	if body == "" {
+		body = "澄清任务已完成，但没有返回可展示内容。"
+	}
+	if _, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+		ID:          memberTaskID,
+		WorkspaceID: workspaceID,
+		Status:      "completed",
+		Findings:    body,
+		Error:       "",
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to complete issue draft member task",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.AppendIssueDraftMessage(ctx, db.AppendIssueDraftMessageParams{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
+		AuthorType:  issuedraft.AuthorAgent,
+		AuthorID:    task.AgentID,
+		MessageType: issuedraft.MessageFinding,
+		Content:     body,
+		Metadata:    issueDraftTaskMetadata(task),
+	}); err != nil {
+		slog.Warn("failed to append issue draft finding",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+		Status:      issuedraft.StatusClarifying,
+		LastError:   "",
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft session clarified",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) failIssueDraftMemberTask(ctx context.Context, task db.AgentTaskQueue, draft IssueDraftContext, errMsg string) {
+	sessionID, workspaceID, memberTaskID, ok := issueDraftContextIDs(task, draft)
+	if !ok {
+		return
+	}
+	errMsg = strings.TrimSpace(errMsg)
+	if errMsg == "" {
+		errMsg = "澄清任务失败，但没有返回错误详情。"
+	}
+	if _, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+		ID:          memberTaskID,
+		WorkspaceID: workspaceID,
+		Status:      "failed",
+		Findings:    "",
+		Error:       errMsg,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft member task failed",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.AppendIssueDraftMessage(ctx, db.AppendIssueDraftMessageParams{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
+		AuthorType:  issuedraft.AuthorAgent,
+		AuthorID:    task.AgentID,
+		MessageType: issuedraft.MessageError,
+		Content:     errMsg,
+		Metadata:    issueDraftTaskMetadata(task),
+	}); err != nil {
+		slog.Warn("failed to append issue draft task error",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+		Status:      issuedraft.StatusClarifying,
+		LastError:   errMsg,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft session after task failure",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
 }
 
 func (s *TaskService) markSquadInstructionsGenerationRunning(ctx context.Context, task db.AgentTaskQueue) {
