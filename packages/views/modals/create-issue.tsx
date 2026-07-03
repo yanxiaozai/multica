@@ -321,15 +321,17 @@ export function ManualCreatePanel({
     enabled: !!issueDraftId,
   });
   const selectedSquad = squads.find((s) => s.id === assigneeId);
+  const selectedSquadId =
+    assigneeType === "squad" && assigneeId ? assigneeId : selectedSquad?.id;
   const activeIssueDraftTask = issueDraftBundle?.member_tasks.find((task) =>
     task.status === "queued" || task.status === "running",
   );
   const canStartIssueDraft = Boolean(
-    projectId && assigneeType === "squad" && assigneeId,
+    projectId && selectedSquadId,
   );
   const issueDraftStartHint = !projectId
     ? "先选择项目，详细 .spec 会写入这个项目的主仓库。"
-    : assigneeType !== "squad" || !assigneeId
+    : !selectedSquadId
       ? "先把 assignee 选择为小队。"
       : "可以开启小队澄清；底部按钮仍可直接创建普通 issue。";
   const resetForNextIssue = () => {
@@ -508,12 +510,12 @@ export function ManualCreatePanel({
   };
 
   const startIssueDraft = async () => {
-    if (!canStartIssueDraft || !projectId || !assigneeId) return;
+    if (!canStartIssueDraft || !projectId || !selectedSquadId) return;
     const description = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const initialMessage = [title.trim(), description].filter(Boolean).join("\n\n") || "用户开启了小队 issue 澄清会话。";
     const bundle = await createIssueDraftMutation.mutateAsync({
       project_id: projectId,
-      squad_id: assigneeId,
+      squad_id: selectedSquadId,
       initial_message: initialMessage,
     });
     setIssueDraftId(bundle.session.id);
@@ -645,7 +647,7 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
-            {(projectId || assigneeType === "squad" || issueDraftBundle) && (
+            {(projectId || selectedSquadId || issueDraftBundle) && (
               <div className="mx-5 mb-2 shrink-0 rounded-md border bg-muted/20 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
