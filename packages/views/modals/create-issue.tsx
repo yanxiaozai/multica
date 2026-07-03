@@ -201,6 +201,8 @@ export function ManualCreatePanel({
   const setDraft = useIssueDraftStore((s) => s.setDraft);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
+  const issueDraftSessionId = useIssueDraftStore((s) => s.issueDraftSessionId);
+  const setIssueDraftSessionId = useIssueDraftStore((s) => s.setIssueDraftSessionId);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -249,7 +251,7 @@ export function ManualCreatePanel({
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
-  const [issueDraftId, setIssueDraftId] = useState<string | null>(null);
+  const [issueDraftId, setIssueDraftId] = useState<string | null>(issueDraftSessionId ?? null);
   const [issueDraftReply, setIssueDraftReply] = useState("");
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
@@ -283,6 +285,12 @@ export function ManualCreatePanel({
     if (kept.length !== attachments.length) setDraft({ attachments: kept });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!issueDraftId && issueDraftSessionId) {
+      setIssueDraftId(issueDraftSessionId);
+    }
+  }, [issueDraftId, issueDraftSessionId]);
 
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
@@ -523,6 +531,7 @@ export function ManualCreatePanel({
       initial_message: initialMessage,
     });
     setIssueDraftId(bundle.session.id);
+    setIssueDraftSessionId(bundle.session.id);
     toast.success("Issue draft session started");
   };
 
@@ -530,6 +539,15 @@ export function ManualCreatePanel({
     if (!issueDraftId || !issueDraftReply.trim()) return;
     await appendIssueDraftMessage.mutateAsync({ content: issueDraftReply.trim() });
     setIssueDraftReply("");
+  };
+
+  const confirmIssueDraftSession = async () => {
+    if (!issueDraftId) return;
+    const bundle = await confirmIssueDraft.mutateAsync();
+    if (bundle.session.status === "created") {
+      setIssueDraftId(null);
+      setIssueDraftSessionId(undefined);
+    }
   };
 
   // Switch to agent mode. Hand the typed text up to the shell as the carry
@@ -651,7 +669,7 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
-            {(projectId || selectedSquadId || issueDraftBundle) && (
+            {(projectId || selectedSquadId || issueDraftId || issueDraftBundle) && (
               <div className="mx-5 mb-2 shrink-0 rounded-md border bg-muted/20 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -694,7 +712,7 @@ export function ManualCreatePanel({
                       </Button>
                       <Button
                         size="sm"
-                        onClick={() => confirmIssueDraft.mutateAsync()}
+                        onClick={confirmIssueDraftSession}
                         disabled={!issueDraftId || confirmIssueDraft.isPending}
                       >
                         Confirm
