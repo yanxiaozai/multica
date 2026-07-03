@@ -331,6 +331,12 @@ type AgentTaskResponse struct {
 	QuickCreatePrompt                 string               `json:"quick_create_prompt,omitempty"`                  // user's natural-language input for quick-create tasks
 	QuickCreateAttachmentIDs          []string             `json:"quick_create_attachment_ids,omitempty"`          // attachment ids uploaded in the quick-create prompt and bound on issue create
 	SquadInstructionsGenerationPrompt string               `json:"squad_instructions_generation_prompt,omitempty"` // prompt for internal squad instructions generation tasks
+	IssueDraftSessionID               string               `json:"issue_draft_session_id,omitempty"`               // non-empty for issue draft clarification / analysis tasks
+	IssueDraftMemberTaskID            string               `json:"issue_draft_member_task_id,omitempty"`           // member-task row the result should be written back to
+	IssueDraftRole                    string               `json:"issue_draft_role,omitempty"`                     // leader | member
+	IssueDraftPrompt                  string               `json:"issue_draft_prompt,omitempty"`                   // read-only prompt for draft clarification / code inspection
+	IssueDraftReadOnly                bool                 `json:"issue_draft_read_only,omitempty"`                // always true for draft tasks; daemon prompt treats writes as forbidden
+	IssueDraftPrimaryLocalPath        string               `json:"issue_draft_primary_local_path,omitempty"`       // target repo path snapshot for .spec/code inspection context
 	HandoffNote                       string               `json:"handoff_note,omitempty"`                         // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
 	SquadID                           string               `json:"squad_id,omitempty"`                             // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                         string               `json:"squad_name,omitempty"`                           // display name for the picker squad
@@ -564,7 +570,7 @@ func basename(p string) string {
 // computeTaskKind picks the source-discriminator string the activity UI uses
 // to choose how to render a task row. Computed from the existing FK shape so
 // no extra DB lookup is needed: chat / autopilot / comment-on-issue (any
-// triggered task with both an issue_id and trigger_comment_id) / quick_create
+// triggered task with both an issue_id and trigger_comment_id) / issue_draft / quick_create
 // (no linked source — the agent is creating the issue itself) / direct
 // (assignee-driven task on an existing issue).
 func computeTaskKind(t db.AgentTaskQueue) string {
@@ -580,6 +586,9 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 		}
 		if len(t.Context) > 0 && json.Unmarshal(t.Context, &gen) == nil && gen.Type == "squad_instructions_generation" {
 			return "squad_instructions_generation"
+		}
+		if len(t.Context) > 0 && json.Unmarshal(t.Context, &gen) == nil && gen.Type == "issue_draft" {
+			return "issue_draft"
 		}
 		return "quick_create"
 	}

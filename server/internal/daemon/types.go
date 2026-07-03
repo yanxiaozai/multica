@@ -82,6 +82,12 @@ type Task struct {
 	QuickCreatePrompt                 string                `json:"quick_create_prompt,omitempty"`                  // user's natural-language input for quick-create tasks
 	QuickCreateAttachmentIDs          []string              `json:"quick_create_attachment_ids,omitempty"`          // attachments uploaded in the quick-create prompt and bound by issue create
 	SquadInstructionsGenerationPrompt string                `json:"squad_instructions_generation_prompt,omitempty"` // prompt for internal squad instructions generation tasks
+	IssueDraftSessionID               string                `json:"issue_draft_session_id,omitempty"`               // issue draft session this read-only task contributes to
+	IssueDraftMemberTaskID            string                `json:"issue_draft_member_task_id,omitempty"`           // member-task row for result writeback
+	IssueDraftRole                    string                `json:"issue_draft_role,omitempty"`                     // leader | member
+	IssueDraftPrompt                  string                `json:"issue_draft_prompt,omitempty"`                   // read-only issue draft clarification / code inspection prompt
+	IssueDraftReadOnly                bool                  `json:"issue_draft_read_only,omitempty"`                // true means writes/git mutations are forbidden
+	IssueDraftPrimaryLocalPath        string                `json:"issue_draft_primary_local_path,omitempty"`       // target repo path snapshot for context
 	HandoffNote                       string                `json:"handoff_note,omitempty"`                         // assignment handoff instruction; rendered into the opening prompt + issue_context.md
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader

@@ -673,6 +673,25 @@ type SquadInstructionsGenerationContext struct {
 	Prompt          string `json:"prompt"`
 }
 
+// IssueDraftContextType marks a read-only task that contributes to an issue
+// draft session before the user confirms issue creation. These tasks must not
+// write code or mutate git state; they gather requirements, inspect code when
+// relevant, and report findings back to the draft session.
+const IssueDraftContextType = "issue_draft"
+
+type IssueDraftContext struct {
+	Type             string `json:"type"`
+	WorkspaceID      string `json:"workspace_id"`
+	SessionID        string `json:"session_id"`
+	ProjectID        string `json:"project_id"`
+	SquadID          string `json:"squad_id"`
+	MemberTaskID     string `json:"member_task_id,omitempty"`
+	Role             string `json:"role"`
+	Prompt           string `json:"prompt"`
+	PrimaryLocalPath string `json:"primary_local_path,omitempty"`
+	ReadOnly         bool   `json:"read_only"`
+}
+
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
 // task's context JSONB and the agent is expected to translate it into a
@@ -756,6 +775,41 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+func (s *TaskService) EnqueueIssueDraftTask(ctx context.Context, agent db.Agent, payload IssueDraftContext) (db.AgentTaskQueue, error) {
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	payload.Type = IssueDraftContextType
+	payload.ReadOnly = true
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal issue draft context: %w", err)
+	}
+	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agent.ID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create issue draft task: %w", err)
+	}
+	slog.Info("issue draft task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(agent.ID),
+		"workspace_id", payload.WorkspaceID,
+		"session_id", payload.SessionID,
+		"member_task_id", payload.MemberTaskID,
+		"role", payload.Role,
+	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
@@ -2464,6 +2518,9 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
 		return gen.WorkspaceID
 	}
+	if draft, ok := s.parseIssueDraftContext(task); ok {
+		return draft.WorkspaceID
+	}
 	return ""
 }
 
@@ -2691,6 +2748,23 @@ func (s *TaskService) parseSquadInstructionsGenerationContext(task db.AgentTaskQ
 		return SquadInstructionsGenerationContext{}, false
 	}
 	return gen, true
+}
+
+func (s *TaskService) parseIssueDraftContext(task db.AgentTaskQueue) (IssueDraftContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return IssueDraftContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return IssueDraftContext{}, false
+	}
+	var draft IssueDraftContext
+	if err := json.Unmarshal(task.Context, &draft); err != nil {
+		return IssueDraftContext{}, false
+	}
+	if draft.Type != IssueDraftContextType || draft.SessionID == "" {
+		return IssueDraftContext{}, false
+	}
+	return draft, true
 }
 
 func (s *TaskService) markSquadInstructionsGenerationRunning(ctx context.Context, task db.AgentTaskQueue) {

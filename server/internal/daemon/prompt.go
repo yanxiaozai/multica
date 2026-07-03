@@ -18,6 +18,9 @@ func BuildPrompt(task Task, provider string) string {
 	if task.SquadInstructionsGenerationPrompt != "" {
 		return buildSquadInstructionsGenerationPrompt(task)
 	}
+	if task.IssueDraftPrompt != "" {
+		return buildIssueDraftPrompt(task)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -47,6 +50,38 @@ func BuildPrompt(task Task, provider string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildIssueDraftPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are contributing to a Multica issue draft session before any issue has been created.\n\n")
+	b.WriteString("This is a read-only requirements and code-inspection task. Do not edit files, create commits, push branches, create issues, or mutate external systems. If code inspection is useful, read files and summarize evidence only.\n\n")
+	fmt.Fprintf(&b, "Issue draft session ID: %s\n", task.IssueDraftSessionID)
+	if task.IssueDraftMemberTaskID != "" {
+		fmt.Fprintf(&b, "Member task ID: %s\n", task.IssueDraftMemberTaskID)
+	}
+	if task.IssueDraftRole != "" {
+		fmt.Fprintf(&b, "Draft role: %s\n", task.IssueDraftRole)
+	}
+	if task.ProjectTitle != "" {
+		fmt.Fprintf(&b, "Project: %s", task.ProjectTitle)
+		if task.ProjectID != "" {
+			fmt.Fprintf(&b, " (%s)", task.ProjectID)
+		}
+		b.WriteString("\n")
+	}
+	if task.IssueDraftPrimaryLocalPath != "" {
+		fmt.Fprintf(&b, "Primary local repository snapshot: %s\n", task.IssueDraftPrimaryLocalPath)
+	}
+	b.WriteString("\nTask prompt:\n")
+	fmt.Fprintf(&b, "%s\n\n", task.IssueDraftPrompt)
+	b.WriteString("Output requirements:\n")
+	b.WriteString("- If requirements are unclear, ask concise clarification questions.\n")
+	b.WriteString("- If you inspected code, list the exact files/functions and the conclusion supported by them.\n")
+	b.WriteString("- Separate facts from assumptions.\n")
+	b.WriteString("- End with a short `Findings` section that can be copied into the draft session.\n")
+	b.WriteString("- Do not include implementation commands as actions you performed unless they were read-only inspection commands.\n")
 	return b.String()
 }
 

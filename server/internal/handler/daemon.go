@@ -1742,11 +1742,78 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Issue draft task: no issue / chat / autopilot link. The task is
+	// read-only pre-confirmation work for a draft session, so the daemon gets
+	// enough project/resource context to inspect code but the prompt forbids
+	// mutations.
+	if resp.SquadInstructionsGenerationPrompt == "" && task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+		var draft service.IssueDraftContext
+		if json.Unmarshal(task.Context, &draft) == nil && draft.Type == service.IssueDraftContextType {
+			resp.IssueDraftSessionID = draft.SessionID
+			resp.IssueDraftMemberTaskID = draft.MemberTaskID
+			resp.IssueDraftRole = draft.Role
+			resp.IssueDraftPrompt = draft.Prompt
+			resp.IssueDraftReadOnly = true
+			resp.IssueDraftPrimaryLocalPath = draft.PrimaryLocalPath
+			resp.ThreadName = "Issue draft: " + draft.SessionID
+			resp.WorkspaceID = draft.WorkspaceID
+			resp.ProjectID = draft.ProjectID
+			resp.SquadID = draft.SquadID
+
+			var projectRepos []RepoData
+			if draft.ProjectID != "" {
+				if projectUUID, err := util.ParseUUID(draft.ProjectID); err == nil {
+					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
+						resp.ProjectTitle = proj.Title
+						resp.ProjectDescription = proj.Description.String
+					}
+					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
+						out := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							out = append(out, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct {
+									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
+								}
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+								}
+							}
+						}
+						resp.ProjectResources = out
+					}
+				}
+			}
+			if len(projectRepos) > 0 {
+				resp.Repos = projectRepos
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(draft.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
+	}
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
-	if resp.SquadInstructionsGenerationPrompt == "" && task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+	if resp.SquadInstructionsGenerationPrompt == "" && resp.IssueDraftPrompt == "" && task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
 		var qc service.QuickCreateContext
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
@@ -1891,6 +1958,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
+			"has_issue_draft", resp.IssueDraftPrompt != "",
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",
