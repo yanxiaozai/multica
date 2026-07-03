@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -133,6 +134,12 @@ func (s *Service) GetSessionBundle(ctx context.Context, workspaceID, sessionID p
 }
 
 func (s *Service) AppendMessage(ctx context.Context, in AppendMessageInput) (db.IssueDraftMessage, error) {
+	if _, err := s.Queries.GetIssueDraftSessionInWorkspace(ctx, db.GetIssueDraftSessionInWorkspaceParams{
+		ID:          in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+	}); err != nil {
+		return db.IssueDraftMessage{}, fmt.Errorf("get issue draft session: %w", err)
+	}
 	metadata := in.Metadata
 	if len(metadata) == 0 {
 		metadata = []byte(`{}`)
@@ -150,6 +157,253 @@ func (s *Service) AppendMessage(ctx context.Context, in AppendMessageInput) (db.
 		return db.IssueDraftMessage{}, fmt.Errorf("append issue draft message: %w", err)
 	}
 	return msg, nil
+}
+
+func (s *Service) GenerateArtifacts(ctx context.Context, in GenerateArtifactsInput) (SessionBundle, error) {
+	session, err := s.Queries.GetIssueDraftSessionInWorkspace(ctx, db.GetIssueDraftSessionInWorkspaceParams{
+		ID:          in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+	})
+	if err != nil {
+		return SessionBundle{}, fmt.Errorf("get issue draft session: %w", err)
+	}
+	messages, err := s.Queries.ListIssueDraftMessages(ctx, db.ListIssueDraftMessagesParams{
+		SessionID:   in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+	})
+	if err != nil {
+		return SessionBundle{}, fmt.Errorf("list issue draft messages: %w", err)
+	}
+	memberTasks, err := s.Queries.ListIssueDraftMemberTasks(ctx, db.ListIssueDraftMemberTasksParams{
+		SessionID:   in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+	})
+	if err != nil {
+		return SessionBundle{}, fmt.Errorf("list issue draft member tasks: %w", err)
+	}
+
+	template := buildTemplateInput(session, messages, memberTasks)
+	detailed := RenderDetailedSpec(template)
+	multicaIssue := RenderMulticaIssue(template)
+	remoteIssue := RenderRemoteIssue(template)
+
+	for _, artifact := range []struct {
+		kind    string
+		content string
+	}{
+		{ArtifactDetailedSpec, detailed},
+		{ArtifactMulticaIssue, multicaIssue},
+		{ArtifactRemoteIssue, remoteIssue},
+	} {
+		if _, err := s.createArtifact(ctx, in.WorkspaceID, in.SessionID, artifact.kind, artifact.content, in.GeneratedBy); err != nil {
+			return SessionBundle{}, err
+		}
+	}
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+		Status:      StatusReadyForReview,
+		LastError:   "",
+	}); err != nil {
+		return SessionBundle{}, fmt.Errorf("mark issue draft ready: %w", err)
+	}
+	if _, err := s.AppendMessage(ctx, AppendMessageInput{
+		SessionID:   in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+		AuthorType:  AuthorSystem,
+		MessageType: MessageDraftPreview,
+		Content:     "已生成详细 .spec 草稿、Multica issue 草稿和远端 issue 简版草稿，请确认后再执行创建。",
+	}); err != nil {
+		return SessionBundle{}, err
+	}
+	return s.GetSessionBundle(ctx, in.WorkspaceID, in.SessionID)
+}
+
+func (s *Service) Confirm(ctx context.Context, in ConfirmInput) (SessionBundle, error) {
+	if _, err := s.requireLatestArtifact(ctx, in.WorkspaceID, in.SessionID, ArtifactDetailedSpec); err != nil {
+		return SessionBundle{}, err
+	}
+	if _, err := s.requireLatestArtifact(ctx, in.WorkspaceID, in.SessionID, ArtifactRemoteIssue); err != nil {
+		return SessionBundle{}, err
+	}
+	for _, step := range []string{"write_spec", "create_multica_issue", "create_remote_issue", "commit_and_push", "link_outputs"} {
+		if _, err := s.Queries.UpsertIssueDraftConfirmStep(ctx, db.UpsertIssueDraftConfirmStepParams{
+			SessionID:      in.SessionID,
+			WorkspaceID:    in.WorkspaceID,
+			Step:           step,
+			Status:         "pending",
+			ResultMetadata: []byte(`{}`),
+		}); err != nil {
+			return SessionBundle{}, fmt.Errorf("upsert confirm step %s: %w", step, err)
+		}
+	}
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+		Status:      StatusCreating,
+		LastError:   "",
+	}); err != nil {
+		return SessionBundle{}, fmt.Errorf("mark issue draft creating: %w", err)
+	}
+	if _, err := s.AppendMessage(ctx, AppendMessageInput{
+		SessionID:   in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+		AuthorType:  AuthorSystem,
+		MessageType: MessageStatus,
+		Content:     "确认已接收，执行步骤已排队：写入目标仓库 .spec、创建 Multica issue、创建远端 issue、提交并推送目标仓库、回填关联信息。",
+	}); err != nil {
+		return SessionBundle{}, err
+	}
+	return s.GetSessionBundle(ctx, in.WorkspaceID, in.SessionID)
+}
+
+func (s *Service) Cancel(ctx context.Context, in CancelInput) (SessionBundle, error) {
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+		Status:      StatusCancelled,
+		LastError:   "",
+	}); err != nil {
+		return SessionBundle{}, fmt.Errorf("cancel issue draft: %w", err)
+	}
+	content := "已取消本次 issue 草稿。"
+	if strings.TrimSpace(in.Reason) != "" {
+		content += "\n\n原因: " + strings.TrimSpace(in.Reason)
+	}
+	if _, err := s.AppendMessage(ctx, AppendMessageInput{
+		SessionID:   in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+		AuthorType:  AuthorSystem,
+		MessageType: MessageStatus,
+		Content:     content,
+	}); err != nil {
+		return SessionBundle{}, err
+	}
+	return s.GetSessionBundle(ctx, in.WorkspaceID, in.SessionID)
+}
+
+func (s *Service) createArtifact(ctx context.Context, workspaceID, sessionID pgtype.UUID, kind, content string, generatedBy pgtype.UUID) (db.IssueDraftArtifact, error) {
+	revision, err := s.Queries.GetNextIssueDraftArtifactRevision(ctx, db.GetNextIssueDraftArtifactRevisionParams{
+		SessionID:    sessionID,
+		WorkspaceID:  workspaceID,
+		ArtifactType: kind,
+	})
+	if err != nil {
+		return db.IssueDraftArtifact{}, fmt.Errorf("get next artifact revision: %w", err)
+	}
+	artifact, err := s.Queries.CreateIssueDraftArtifact(ctx, db.CreateIssueDraftArtifactParams{
+		SessionID:          sessionID,
+		WorkspaceID:        workspaceID,
+		ArtifactType:       kind,
+		Revision:           revision,
+		Content:            content,
+		GeneratedByAgentID: generatedBy,
+	})
+	if err != nil {
+		return db.IssueDraftArtifact{}, fmt.Errorf("create issue draft artifact: %w", err)
+	}
+	return artifact, nil
+}
+
+func (s *Service) requireLatestArtifact(ctx context.Context, workspaceID, sessionID pgtype.UUID, kind string) (db.IssueDraftArtifact, error) {
+	artifact, err := s.Queries.GetLatestIssueDraftArtifact(ctx, db.GetLatestIssueDraftArtifactParams{
+		SessionID:    sessionID,
+		WorkspaceID:  workspaceID,
+		ArtifactType: kind,
+	})
+	if err != nil {
+		return db.IssueDraftArtifact{}, fmt.Errorf("latest %s artifact is required: %w", kind, err)
+	}
+	return artifact, nil
+}
+
+func buildTemplateInput(session db.IssueDraftSession, messages []db.IssueDraftMessage, memberTasks []db.IssueDraftMemberTask) TemplateInput {
+	userText := collectMessages(messages, AuthorMember)
+	findings := collectFindings(memberTasks)
+	title := firstNonEmptyLine(userText)
+	if title == "" {
+		title = "新建 issue 需求草稿"
+	}
+	background := "用户原始需求:\n\n" + fallback(userText, "TBD")
+	if findings != "" {
+		background += "\n\n小队成员发现:\n\n" + findings
+	}
+	specPathHint := strings.TrimRight(session.PrimaryLocalPathSnapshot, "/") + "/.spec/"
+	goal := "根据用户需求交付: " + fallback(strings.TrimPrefix(userText, "- "), title)
+	return TemplateInput{
+		Title:                title,
+		Background:           background,
+		DuplicateSearch:      "待 PM Agent 基于现有 issue / .spec 记忆完成查重；当前草稿保留查重结论入口。",
+		SplitDecision:        "默认按一个独立需求处理；若小队追问后发现存在可并行交付的子目标，再拆分为父子 issue。",
+		Goal:                 goal,
+		NonGoal:              "不在远端 issue 中写入详细实施计划；不允许澄清阶段任务修改代码、提交 git 或创建外部资源。",
+		ImpactScope:          fmt.Sprintf("目标项目主仓库: `%s`\n详细版本写入: `%s`", session.PrimaryLocalPathSnapshot, specPathHint),
+		UserScenario:         "用户提出需求后，系统进入澄清会话，成员根据技能补充问题/代码证据，最终生成可确认的标准模板。\n\n用户需求摘要:\n\n" + fallback(userText, "TBD"),
+		AcceptanceCriteria:   []string{"满足用户原始需求: " + title, "必要的影响范围、验收标准、技术约束已被澄清", "生成的详细版本写入目标项目 .spec", "远端 issue 和提交信息不包含详细实施计划", "用户确认后才进入创建/同步步骤"},
+		TechnicalConstraints: "React Query 管理服务端 issue draft 状态；Zustand 只保存本地选择/草稿 UI 状态；小队成员任务必须使用 issue_draft 只读上下文。",
+		DesignRecord:         "草稿会话持久化为 issue_draft_session；成员任务、对话消息、artifact、确认步骤分别记录，便于审计与重试。",
+		ImplementationPlan:   "1. 创建 issue draft session 并绑定项目主仓库 local_directory resource。\n2. 按小队成员创建只读 member task，并下发包含真实技能/仓库路径/会话上下文的 prompt。\n3. 汇总对话与 findings，生成 detailed_spec / multica_issue / remote_issue 三类 artifact。\n4. 用户确认后，详细 spec 写入目标仓库 .spec，远端 issue 使用简版正文。\n5. 执行创建 issue、提交并推送目标仓库，记录每个确认步骤结果。",
+		VerificationPlan:     "go test ./internal/service/issuedraft ./internal/handler\npnpm --filter @multica/core typecheck\npnpm --filter @multica/views typecheck",
+		RisksAndRollback:     "风险: 目标项目缺少 local_directory resource、成员 runtime 离线、远端 issue/git 操作失败。回滚: 保留 artifact 和 confirm step，可取消 session 或重试失败步骤。",
+		RelatedInfo:          "由 Multica issue draft flow 自动生成。",
+		PMAgent:              "issue draft PM flow",
+		ArchitectAgent:       "issue draft ARCH flow",
+		PMCreatedAt:          pgTime(session.CreatedAt),
+		ArchitectAlignedAt:   time.Now(),
+	}
+}
+
+func collectMessages(messages []db.IssueDraftMessage, authorType string) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		if msg.AuthorType != authorType && authorType != "" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(content)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func collectFindings(tasks []db.IssueDraftMemberTask) string {
+	var b strings.Builder
+	for _, task := range tasks {
+		finding := strings.TrimSpace(task.Findings)
+		if finding == "" {
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(finding)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func firstNonEmptyLine(value string) string {
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.Trim(strings.TrimSpace(line), "-# ")
+		if line == "" {
+			continue
+		}
+		if len([]rune(line)) > 80 {
+			runes := []rune(line)
+			return string(runes[:80])
+		}
+		return line
+	}
+	return ""
+}
+
+func pgTime(ts pgtype.Timestamptz) time.Time {
+	if !ts.Valid {
+		return time.Time{}
+	}
+	return ts.Time
 }
 
 func (s *Service) ResolvePrimaryRepository(ctx context.Context, projectID pgtype.UUID) (PrimaryRepository, error) {

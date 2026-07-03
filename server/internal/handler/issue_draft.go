@@ -3,12 +3,14 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/service/issuedraft"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -22,6 +24,15 @@ type CreateIssueDraftRequest struct {
 type AppendIssueDraftMessageRequest struct {
 	Content  string          `json:"content"`
 	Metadata json.RawMessage `json:"metadata"`
+}
+
+type DelegateIssueDraftRequest struct {
+	Prompt string   `json:"prompt"`
+	Agents []string `json:"agents"`
+}
+
+type CancelIssueDraftRequest struct {
+	Reason string `json:"reason"`
 }
 
 type IssueDraftSessionResponse struct {
@@ -193,19 +204,183 @@ func (h *Handler) AppendIssueDraftMessage(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "issue draft delegation is not implemented yet")
+	workspaceUUID, sessionID, ok := h.issueDraftRouteScope(w, r)
+	if !ok {
+		return
+	}
+	var req DelegateIssueDraftRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	bundle, err := h.IssueDraftService.GetSessionBundle(r.Context(), workspaceUUID, sessionID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue draft not found")
+		return
+	}
+	members, err := h.Queries.ListSquadMembers(r.Context(), bundle.Session.SquadID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list squad members")
+		return
+	}
+	agentFilter := make(map[string]struct{}, len(req.Agents))
+	for _, id := range req.Agents {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			agentFilter[id] = struct{}{}
+		}
+	}
+	queued := 0
+	for _, member := range members {
+		if member.MemberType != "agent" {
+			continue
+		}
+		agentID := uuidToString(member.MemberID)
+		if len(agentFilter) > 0 {
+			if _, ok := agentFilter[agentID]; !ok {
+				continue
+			}
+		}
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          member.MemberID,
+			WorkspaceID: workspaceUUID,
+		})
+		if err != nil {
+			continue
+		}
+		readScope := json.RawMessage(fmt.Sprintf(`{"primary_local_path":%q,"mode":"read_only"}`, bundle.Session.PrimaryLocalPathSnapshot))
+		memberTask, err := h.Queries.CreateIssueDraftMemberTask(r.Context(), db.CreateIssueDraftMemberTaskParams{
+			SessionID:   sessionID,
+			WorkspaceID: workspaceUUID,
+			AgentID:     member.MemberID,
+			Status:      "queued",
+			SkillBasis:  strings.TrimSpace(member.Role),
+			ReadScope:   readScope,
+		})
+		if err != nil {
+			continue
+		}
+		prompt := buildIssueDraftMemberPrompt(bundle, agent, member, req.Prompt)
+		task, err := h.TaskService.EnqueueIssueDraftTask(r.Context(), agent, service.IssueDraftContext{
+			WorkspaceID:      uuidToString(workspaceUUID),
+			SessionID:        uuidToString(sessionID),
+			ProjectID:        uuidToString(bundle.Session.ProjectID),
+			SquadID:          uuidToString(bundle.Session.SquadID),
+			MemberTaskID:     uuidToString(memberTask.ID),
+			Role:             strings.TrimSpace(member.Role),
+			Prompt:           prompt,
+			PrimaryLocalPath: bundle.Session.PrimaryLocalPathSnapshot,
+		})
+		if err != nil {
+			_, _ = h.Queries.UpdateIssueDraftMemberTaskStatus(r.Context(), db.UpdateIssueDraftMemberTaskStatusParams{
+				ID:          memberTask.ID,
+				WorkspaceID: workspaceUUID,
+				Status:      "failed",
+				Error:       err.Error(),
+			})
+			continue
+		}
+		if _, err := h.Queries.LinkIssueDraftMemberTaskQueueItem(r.Context(), db.LinkIssueDraftMemberTaskQueueItemParams{
+			ID:          memberTask.ID,
+			WorkspaceID: workspaceUUID,
+			TaskID:      task.ID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to link issue draft task")
+			return
+		}
+		queued++
+	}
+	if queued == 0 {
+		writeError(w, http.StatusConflict, "no squad agents were available to delegate")
+		return
+	}
+	if _, err := h.IssueDraftService.AppendMessage(r.Context(), issuedraft.AppendMessageInput{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceUUID,
+		AuthorType:  issuedraft.AuthorSystem,
+		MessageType: issuedraft.MessageStatus,
+		Content:     fmt.Sprintf("已派发 %d 个小队成员只读澄清任务。", queued),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to append issue draft status")
+		return
+	}
+	if _, err := h.Queries.UpdateIssueDraftSessionStatus(r.Context(), db.UpdateIssueDraftSessionStatusParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceUUID,
+		Status:      issuedraft.StatusDelegating,
+		LastError:   "",
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue draft")
+		return
+	}
+	updated, err := h.IssueDraftService.GetSessionBundle(r.Context(), workspaceUUID, sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load issue draft")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(updated))
 }
 
 func (h *Handler) GenerateIssueDraft(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "issue draft generation is not implemented yet")
+	workspaceUUID, sessionID, ok := h.issueDraftRouteScope(w, r)
+	if !ok {
+		return
+	}
+	bundle, err := h.IssueDraftService.GenerateArtifacts(r.Context(), issuedraft.GenerateArtifactsInput{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate issue draft")
+		return
+	}
+	writeJSON(w, http.StatusOK, issueDraftBundleToResponse(bundle))
 }
 
 func (h *Handler) ConfirmIssueDraft(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "issue draft confirmation is not implemented yet")
+	workspaceUUID, sessionID, ok := h.issueDraftRouteScope(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, uuidToString(workspaceUUID))
+	if !ok {
+		return
+	}
+	bundle, err := h.IssueDraftService.Confirm(r.Context(), issuedraft.ConfirmInput{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceUUID,
+		ConfirmedBy: member.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusConflict, "issue draft is not ready to confirm")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(bundle))
 }
 
 func (h *Handler) CancelIssueDraft(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "issue draft cancellation is not implemented yet")
+	workspaceUUID, sessionID, ok := h.issueDraftRouteScope(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, uuidToString(workspaceUUID))
+	if !ok {
+		return
+	}
+	var req CancelIssueDraftRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	bundle, err := h.IssueDraftService.Cancel(r.Context(), issuedraft.CancelInput{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceUUID,
+		CancelledBy: member.ID,
+		Reason:      req.Reason,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to cancel issue draft")
+		return
+	}
+	writeJSON(w, http.StatusOK, issueDraftBundleToResponse(bundle))
 }
 
 func (h *Handler) issueDraftRouteScope(w http.ResponseWriter, r *http.Request) (pgtype.UUID, pgtype.UUID, bool) {
@@ -351,4 +526,47 @@ func rawJSONOrObject(raw []byte) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	return json.RawMessage(raw)
+}
+
+func buildIssueDraftMemberPrompt(bundle issuedraft.SessionBundle, agent db.Agent, member db.SquadMember, extraPrompt string) string {
+	var b strings.Builder
+	b.WriteString("你正在参与一个 issue draft 澄清会话。请使用你的真实技能和已有 instructions，帮助用户把需求澄清到可创建 issue 的程度。\n\n")
+	b.WriteString("硬性约束:\n")
+	b.WriteString("- 这是只读任务，不要修改代码、不要创建/更新 issue、不要提交或推送 git。\n")
+	b.WriteString("- 如果需要检查已有代码，只能读取目标项目主仓库，并在结论中引用文件路径/行号。\n")
+	b.WriteString("- 明确区分事实、推断和仍需用户回答的问题。\n\n")
+	b.WriteString("上下文:\n")
+	b.WriteString("- Agent: ")
+	b.WriteString(agent.Name)
+	b.WriteByte('\n')
+	b.WriteString("- 小队角色: ")
+	b.WriteString(strings.TrimSpace(member.Role))
+	b.WriteByte('\n')
+	b.WriteString("- 目标项目主仓库: ")
+	b.WriteString(bundle.Session.PrimaryLocalPathSnapshot)
+	b.WriteString("\n\n")
+	if strings.TrimSpace(extraPrompt) != "" {
+		b.WriteString("本轮重点:\n")
+		b.WriteString(strings.TrimSpace(extraPrompt))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("当前对话:\n")
+	for _, msg := range bundle.Messages {
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(msg.AuthorType)
+		b.WriteString("/")
+		b.WriteString(msg.MessageType)
+		b.WriteString(": ")
+		b.WriteString(content)
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n请输出:\n")
+	b.WriteString("1. 你需要用户补充的问题，按优先级排列。\n")
+	b.WriteString("2. 如果已检查代码，列出证据路径和影响判断。\n")
+	b.WriteString("3. 你建议写入 issue 模板的验收标准/技术约束/风险。\n")
+	return b.String()
 }

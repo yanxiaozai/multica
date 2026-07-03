@@ -752,20 +752,32 @@ export class ApiClient {
     ) as IssueDraftBundle["messages"][number];
   }
 
-  async delegateIssueDraft(id: string): Promise<void> {
-    await this.fetch(`/api/issue-drafts/${id}/delegate`, { method: "POST" });
+  async delegateIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/delegate`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/delegate",
+    }) as IssueDraftBundle;
   }
 
-  async generateIssueDraft(id: string): Promise<void> {
-    await this.fetch(`/api/issue-drafts/${id}/generate`, { method: "POST" });
+  async generateIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/generate`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/generate",
+    }) as IssueDraftBundle;
   }
 
-  async confirmIssueDraft(id: string): Promise<void> {
-    await this.fetch(`/api/issue-drafts/${id}/confirm`, { method: "POST" });
+  async confirmIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/confirm`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/confirm",
+    }) as IssueDraftBundle;
   }
 
-  async cancelIssueDraft(id: string): Promise<void> {
-    await this.fetch(`/api/issue-drafts/${id}/cancel`, { method: "POST" });
+  async cancelIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/cancel`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/cancel",
+    }) as IssueDraftBundle;
   }
 
   async createFeedback(data: {

@@ -4,6 +4,7 @@ import { useWorkspaceId } from "../hooks";
 import type {
   AppendIssueDraftMessageRequest,
   CreateIssueDraftRequest,
+  IssueDraftBundle,
 } from "../types";
 import { issueDraftKeys } from "./queries";
 
@@ -50,11 +51,14 @@ export function useCancelIssueDraft(id: string) {
   return useIssueDraftAction(id, () => api.cancelIssueDraft(id));
 }
 
-function useIssueDraftAction(id: string, action: () => Promise<void>) {
+function useIssueDraftAction(id: string, action: () => Promise<IssueDraftBundle>) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: action,
+    onSuccess: (bundle) => {
+      qc.setQueryData(issueDraftKeys.detail(wsId, id), bundle);
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueDraftKeys.detail(wsId, id) });
     },
