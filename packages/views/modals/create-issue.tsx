@@ -325,8 +325,13 @@ export function ManualCreatePanel({
     task.status === "queued" || task.status === "running",
   );
   const canStartIssueDraft = Boolean(
-    title.trim() && projectId && assigneeType === "squad" && assigneeId,
+    projectId && assigneeType === "squad" && assigneeId,
   );
+  const issueDraftStartHint = !projectId
+    ? "先选择项目，详细 .spec 会写入这个项目的主仓库。"
+    : assigneeType !== "squad" || !assigneeId
+      ? "先把 assignee 选择为小队。"
+      : "可以开启小队澄清；底部按钮仍可直接创建普通 issue。";
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -505,7 +510,7 @@ export function ManualCreatePanel({
   const startIssueDraft = async () => {
     if (!canStartIssueDraft || !projectId || !assigneeId) return;
     const description = descEditorRef.current?.getMarkdown()?.trim() ?? "";
-    const initialMessage = [title.trim(), description].filter(Boolean).join("\n\n");
+    const initialMessage = [title.trim(), description].filter(Boolean).join("\n\n") || "用户开启了小队 issue 澄清会话。";
     const bundle = await createIssueDraftMutation.mutateAsync({
       project_id: projectId,
       squad_id: assigneeId,
@@ -640,7 +645,7 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
-            {(assigneeType === "squad" || issueDraftBundle) && (
+            {(projectId || assigneeType === "squad" || issueDraftBundle) && (
               <div className="mx-5 mb-2 shrink-0 rounded-md border bg-muted/20 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -651,7 +656,7 @@ export function ManualCreatePanel({
                     <div className="truncate text-[0.6875rem] text-muted-foreground">
                       {activeIssueDraftTask
                         ? `当前澄清负责人：${getActorName("agent", activeIssueDraftTask.agent_id)} · ${activeIssueDraftTask.status}`
-                        : "Start 会开启会话；Delegate 默认只派发给小队主要负责人。"}
+                        : issueDraftStartHint}
                     </div>
                   </div>
                   {!issueDraftBundle ? (
