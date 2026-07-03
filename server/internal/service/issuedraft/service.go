@@ -10,7 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const localDirectoryResourceType = "local_directory"
@@ -110,6 +112,7 @@ func (s *Service) GetSessionBundle(ctx context.Context, workspaceID, sessionID p
 	if err != nil {
 		return SessionBundle{}, fmt.Errorf("list issue draft member tasks: %w", err)
 	}
+	memberTasks = s.reconcileMemberTasks(ctx, workspaceID, sessionID, memberTasks)
 	artifacts, err := s.Queries.ListIssueDraftArtifacts(ctx, db.ListIssueDraftArtifactsParams{
 		SessionID:   sessionID,
 		WorkspaceID: workspaceID,
@@ -131,6 +134,114 @@ func (s *Service) GetSessionBundle(ctx context.Context, workspaceID, sessionID p
 		Artifacts:    artifacts,
 		ConfirmSteps: confirmSteps,
 	}, nil
+}
+
+func (s *Service) reconcileMemberTasks(ctx context.Context, workspaceID, sessionID pgtype.UUID, memberTasks []db.IssueDraftMemberTask) []db.IssueDraftMemberTask {
+	for i, memberTask := range memberTasks {
+		if memberTask.Status != "queued" && memberTask.Status != "running" {
+			continue
+		}
+		if !memberTask.TaskID.Valid {
+			continue
+		}
+		task, err := s.Queries.GetAgentTask(ctx, memberTask.TaskID)
+		if err != nil {
+			continue
+		}
+		switch task.Status {
+		case "running":
+			updated, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+				ID:          memberTask.ID,
+				WorkspaceID: workspaceID,
+				Status:      "running",
+				Findings:    memberTask.Findings,
+				Error:       "",
+			})
+			if err == nil {
+				memberTasks[i] = updated
+			}
+		case "completed":
+			body := issueDraftTaskOutput(task.Result)
+			if body == "" {
+				body = "澄清任务已完成，但没有返回可展示内容。"
+			}
+			updated, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+				ID:          memberTask.ID,
+				WorkspaceID: workspaceID,
+				Status:      "completed",
+				Findings:    body,
+				Error:       "",
+			})
+			if err == nil {
+				memberTasks[i] = updated
+				_, _ = s.Queries.AppendIssueDraftMessage(ctx, db.AppendIssueDraftMessageParams{
+					SessionID:   sessionID,
+					WorkspaceID: workspaceID,
+					AuthorType:  AuthorAgent,
+					AuthorID:    task.AgentID,
+					MessageType: MessageFinding,
+					Content:     body,
+					Metadata:    issueDraftTaskMetadata(task),
+				})
+				_, _ = s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+					ID:          sessionID,
+					WorkspaceID: workspaceID,
+					Status:      StatusClarifying,
+					LastError:   "",
+				})
+			}
+		case "failed", "cancelled":
+			errMsg := strings.TrimSpace(task.Error.String)
+			if errMsg == "" {
+				errMsg = "澄清任务失败，但没有返回错误详情。"
+			}
+			updated, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+				ID:          memberTask.ID,
+				WorkspaceID: workspaceID,
+				Status:      "failed",
+				Findings:    "",
+				Error:       errMsg,
+			})
+			if err == nil {
+				memberTasks[i] = updated
+				_, _ = s.Queries.AppendIssueDraftMessage(ctx, db.AppendIssueDraftMessageParams{
+					SessionID:   sessionID,
+					WorkspaceID: workspaceID,
+					AuthorType:  AuthorAgent,
+					AuthorID:    task.AgentID,
+					MessageType: MessageError,
+					Content:     errMsg,
+					Metadata:    issueDraftTaskMetadata(task),
+				})
+				_, _ = s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+					ID:          sessionID,
+					WorkspaceID: workspaceID,
+					Status:      StatusClarifying,
+					LastError:   errMsg,
+				})
+			}
+		}
+	}
+	return memberTasks
+}
+
+func issueDraftTaskOutput(result []byte) string {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+}
+
+func issueDraftTaskMetadata(task db.AgentTaskQueue) []byte {
+	metadata, err := json.Marshal(map[string]string{
+		"task_id":  util.UUIDToString(task.ID),
+		"agent_id": util.UUIDToString(task.AgentID),
+	})
+	if err != nil {
+		return nil
+	}
+	return metadata
 }
 
 func (s *Service) AppendMessage(ctx context.Context, in AppendMessageInput) (db.IssueDraftMessage, error) {
