@@ -11,6 +11,7 @@ import (
 type querier interface {
 	CreateIssueDraftSession(ctx context.Context, arg db.CreateIssueDraftSessionParams) (db.IssueDraftSession, error)
 	GetIssueDraftSessionInWorkspace(ctx context.Context, arg db.GetIssueDraftSessionInWorkspaceParams) (db.IssueDraftSession, error)
+	GetActiveIssueDraftSession(ctx context.Context, workspaceID pgtype.UUID) (db.IssueDraftSession, error)
 	GetProjectInWorkspace(ctx context.Context, arg db.GetProjectInWorkspaceParams) (db.Project, error)
 	GetSquadInWorkspace(ctx context.Context, arg db.GetSquadInWorkspaceParams) (db.Squad, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)

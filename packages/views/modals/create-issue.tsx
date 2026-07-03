@@ -49,7 +49,7 @@ import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/que
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useCreateIssueDraft, useAppendIssueDraftMessage, useDelegateIssueDraft, useGenerateIssueDraft, useConfirmIssueDraft } from "@multica/core/issue-drafts/mutations";
-import { issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
+import { activeIssueDraftQueryOptions, issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
 import { squadListOptions } from "@multica/core/workspace/queries";
 import {
   api,
@@ -324,6 +324,10 @@ export function ManualCreatePanel({
   const delegateIssueDraft = useDelegateIssueDraft(issueDraftId ?? "");
   const generateIssueDraft = useGenerateIssueDraft(issueDraftId ?? "");
   const confirmIssueDraft = useConfirmIssueDraft(issueDraftId ?? "");
+  const { data: activeIssueDraftBundle } = useQuery({
+    ...activeIssueDraftQueryOptions(wsId),
+    enabled: !!wsId && !issueDraftId,
+  });
   const { data: issueDraftBundle } = useQuery({
     ...issueDraftQueryOptions(wsId, issueDraftId ?? ""),
     enabled: !!issueDraftId,
@@ -332,6 +336,13 @@ export function ManualCreatePanel({
         ? 2000
         : false,
   });
+  useEffect(() => {
+    const activeID = activeIssueDraftBundle?.session.id;
+    if (!issueDraftId && activeID) {
+      setIssueDraftId(activeID);
+      setIssueDraftSessionId(activeID);
+    }
+  }, [activeIssueDraftBundle?.session.id, issueDraftId, setIssueDraftSessionId]);
   const selectedSquad = squads.find((s) => s.id === assigneeId);
   const selectedSquadId =
     assigneeType === "squad" && assigneeId ? assigneeId : selectedSquad?.id;

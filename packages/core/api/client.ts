@@ -723,6 +723,14 @@ export class ApiClient {
     }) as IssueDraftBundle;
   }
 
+  async getActiveIssueDraft(): Promise<IssueDraftBundle | null> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts/active");
+    if (!raw) return null;
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "GET /api/issue-drafts/active",
+    }) as IssueDraftBundle;
+  }
+
   async appendIssueDraftMessage(
     id: string,
     data: AppendIssueDraftMessageRequest,

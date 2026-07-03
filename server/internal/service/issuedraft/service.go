@@ -136,6 +136,14 @@ func (s *Service) GetSessionBundle(ctx context.Context, workspaceID, sessionID p
 	}, nil
 }
 
+func (s *Service) GetActiveSessionBundle(ctx context.Context, workspaceID pgtype.UUID) (SessionBundle, error) {
+	session, err := s.Queries.GetActiveIssueDraftSession(ctx, workspaceID)
+	if err != nil {
+		return SessionBundle{}, fmt.Errorf("get active issue draft session: %w", err)
+	}
+	return s.GetSessionBundle(ctx, workspaceID, session.ID)
+}
+
 func (s *Service) reconcileMemberTasks(ctx context.Context, workspaceID, sessionID pgtype.UUID, memberTasks []db.IssueDraftMemberTask) []db.IssueDraftMemberTask {
 	for i, memberTask := range memberTasks {
 		if memberTask.Status != "queued" && memberTask.Status != "running" {

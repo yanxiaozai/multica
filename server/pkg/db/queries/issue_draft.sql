@@ -21,6 +21,13 @@ WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: GetActiveIssueDraftSession :one
+SELECT * FROM issue_draft_session
+WHERE workspace_id = $1
+  AND status NOT IN ('created', 'cancelled')
+ORDER BY updated_at DESC, created_at DESC
+LIMIT 1;
+
 -- name: UpdateIssueDraftSessionStatus :one
 UPDATE issue_draft_session
 SET status = $3,

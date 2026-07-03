@@ -213,6 +213,38 @@ func (q *Queries) CreateIssueDraftSession(ctx context.Context, arg CreateIssueDr
 	return i, err
 }
 
+const getActiveIssueDraftSession = `-- name: GetActiveIssueDraftSession :one
+SELECT id, workspace_id, project_id, squad_id, leader_agent_id, primary_project_resource_id, primary_local_path_snapshot, status, created_by, created_issue_id, remote_issue_url, spec_file_path, git_commit_sha, last_error, created_at, updated_at FROM issue_draft_session
+WHERE workspace_id = $1
+  AND status NOT IN ('created', 'cancelled')
+ORDER BY updated_at DESC, created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetActiveIssueDraftSession(ctx context.Context, workspaceID pgtype.UUID) (IssueDraftSession, error) {
+	row := q.db.QueryRow(ctx, getActiveIssueDraftSession, workspaceID)
+	var i IssueDraftSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.SquadID,
+		&i.LeaderAgentID,
+		&i.PrimaryProjectResourceID,
+		&i.PrimaryLocalPathSnapshot,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedIssueID,
+		&i.RemoteIssueUrl,
+		&i.SpecFilePath,
+		&i.GitCommitSha,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueDraftSessionInWorkspace = `-- name: GetIssueDraftSessionInWorkspace :one
 SELECT id, workspace_id, project_id, squad_id, leader_agent_id, primary_project_resource_id, primary_local_path_snapshot, status, created_by, created_issue_id, remote_issue_url, spec_file_path, git_commit_sha, last_error, created_at, updated_at FROM issue_draft_session
 WHERE id = $1 AND workspace_id = $2

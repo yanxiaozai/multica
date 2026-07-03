@@ -174,6 +174,27 @@ func (h *Handler) GetIssueDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issueDraftBundleToResponse(bundle))
 }
 
+func (h *Handler) GetActiveIssueDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	bundle, err := h.IssueDraftService.GetActiveSessionBundle(r.Context(), workspaceUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get active issue draft")
+		return
+	}
+	writeJSON(w, http.StatusOK, issueDraftBundleToResponse(bundle))
+}
+
 func (h *Handler) AppendIssueDraftMessage(w http.ResponseWriter, r *http.Request) {
 	workspaceUUID, sessionID, ok := h.issueDraftRouteScope(w, r)
 	if !ok {
