@@ -195,6 +195,7 @@ export function ManualCreatePanel({
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
+  const { getActorName } = useActorName();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -320,6 +321,9 @@ export function ManualCreatePanel({
     enabled: !!issueDraftId,
   });
   const selectedSquad = squads.find((s) => s.id === assigneeId);
+  const activeIssueDraftTask = issueDraftBundle?.member_tasks.find((task) =>
+    task.status === "queued" || task.status === "running",
+  );
   const canStartIssueDraft = Boolean(
     title.trim() && projectId && assigneeType === "squad" && assigneeId,
   );
@@ -645,7 +649,9 @@ export function ManualCreatePanel({
                       {selectedSquad ? ` · ${selectedSquad.name}` : ""}
                     </div>
                     <div className="truncate text-[0.6875rem] text-muted-foreground">
-                      详细计划写入目标项目 .spec；远端 issue 只保留简版内容。
+                      {activeIssueDraftTask
+                        ? `当前澄清负责人：${getActorName("agent", activeIssueDraftTask.agent_id)} · ${activeIssueDraftTask.status}`
+                        : "Start 会开启会话；Delegate 默认只派发给小队主要负责人。"}
                     </div>
                   </div>
                   {!issueDraftBundle ? (
@@ -687,6 +693,26 @@ export function ManualCreatePanel({
                 </div>
                 {issueDraftBundle && (
                   <div className="mt-3 grid gap-2">
+                    {issueDraftBundle.member_tasks.length > 0 && (
+                      <div className="grid gap-1 rounded border bg-background/70 px-2 py-1.5 text-xs">
+                        {issueDraftBundle.member_tasks.map((task) => (
+                          <div key={task.id} className="flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <ActorAvatar
+                                actorType="agent"
+                                actorId={task.agent_id}
+                                size={16}
+                                profileLink={false}
+                              />
+                              <span className="truncate">
+                                {getActorName("agent", task.agent_id)}
+                              </span>
+                            </div>
+                            <span className="shrink-0 text-muted-foreground">{task.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="max-h-24 overflow-y-auto rounded border bg-background/70 px-2 py-1.5 text-xs">
                       {issueDraftBundle.messages.length === 0 ? (
                         <p className="text-muted-foreground">No messages yet.</p>

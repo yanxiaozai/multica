@@ -235,6 +235,17 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 			agentFilter[id] = struct{}{}
 		}
 	}
+	if len(agentFilter) == 0 {
+		agentFilter[uuidToString(bundle.Session.LeaderAgentID)] = struct{}{}
+	}
+	for _, task := range bundle.MemberTasks {
+		if task.Status == "queued" || task.Status == "running" {
+			if _, ok := agentFilter[uuidToString(task.AgentID)]; ok {
+				writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(bundle))
+				return
+			}
+		}
+	}
 	queued := 0
 	for _, member := range members {
 		if member.MemberType != "agent" {
@@ -304,7 +315,7 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: workspaceUUID,
 		AuthorType:  issuedraft.AuthorSystem,
 		MessageType: issuedraft.MessageStatus,
-		Content:     fmt.Sprintf("已派发 %d 个小队成员只读澄清任务。", queued),
+		Content:     fmt.Sprintf("已派发 %d 个主要负责人只读澄清任务。", queued),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to append issue draft status")
 		return
