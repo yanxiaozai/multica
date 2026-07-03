@@ -1,10 +1,16 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -354,6 +360,11 @@ func (h *Handler) ConfirmIssueDraft(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "issue draft is not ready to confirm")
 		return
 	}
+	bundle, err = h.executeIssueDraftConfirmation(r.Context(), bundle, member.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to execute issue draft confirmation: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(bundle))
 }
 
@@ -569,4 +580,298 @@ func buildIssueDraftMemberPrompt(bundle issuedraft.SessionBundle, agent db.Agent
 	b.WriteString("2. 如果已检查代码，列出证据路径和影响判断。\n")
 	b.WriteString("3. 你建议写入 issue 模板的验收标准/技术约束/风险。\n")
 	return b.String()
+}
+
+func (h *Handler) executeIssueDraftConfirmation(ctx context.Context, bundle issuedraft.SessionBundle, confirmedBy pgtype.UUID) (issuedraft.SessionBundle, error) {
+	session := bundle.Session
+	detailedSpec, ok := latestIssueDraftArtifact(bundle.Artifacts, issuedraft.ArtifactDetailedSpec)
+	if !ok {
+		return bundle, fmt.Errorf("missing detailed spec artifact")
+	}
+	multicaIssue, ok := latestIssueDraftArtifact(bundle.Artifacts, issuedraft.ArtifactMulticaIssue)
+	if !ok {
+		return bundle, fmt.Errorf("missing multica issue artifact")
+	}
+	remoteIssue, ok := latestIssueDraftArtifact(bundle.Artifacts, issuedraft.ArtifactRemoteIssue)
+	if !ok {
+		return bundle, fmt.Errorf("missing remote issue artifact")
+	}
+
+	issueTitle := issueDraftTitle(detailedSpec.Content)
+	if issueTitle == "" {
+		issueTitle = "Issue draft"
+	}
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "create_multica_issue", "running", "", nil, ""); err != nil {
+		return bundle, err
+	}
+	created, err := h.IssueService.Create(ctx, service.IssueCreateParams{
+		WorkspaceID:    session.WorkspaceID,
+		Title:          issueTitle,
+		Description:    pgtype.Text{String: multicaIssue.Content, Valid: strings.TrimSpace(multicaIssue.Content) != ""},
+		Status:         "backlog",
+		Priority:       "none",
+		AssigneeType:   pgtype.Text{String: "squad", Valid: true},
+		AssigneeID:     session.SquadID,
+		CreatorType:    "member",
+		CreatorID:      confirmedBy,
+		ProjectID:      session.ProjectID,
+		AllowDuplicate: true,
+	}, service.IssueCreateOpts{
+		ActorID:  uuidToString(confirmedBy),
+		Platform: "issue_draft",
+	})
+	if err != nil {
+		_ = h.failIssueDraftStep(ctx, session.WorkspaceID, session.ID, "create_multica_issue", err)
+		return h.failIssueDraftSession(ctx, session.WorkspaceID, session.ID, err)
+	}
+	issue := created.Issue
+	identifier := h.getIssuePrefix(ctx, session.WorkspaceID) + "-" + strconv.Itoa(int(issue.Number))
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "create_multica_issue", "succeeded", uuidToString(issue.ID), map[string]any{"identifier": identifier}, ""); err != nil {
+		return bundle, err
+	}
+
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "write_spec", "running", "", nil, ""); err != nil {
+		return bundle, err
+	}
+	specPath, err := writeIssueDraftSpecFile(session.PrimaryLocalPathSnapshot, identifier, detailedSpec.Content)
+	if err != nil {
+		_ = h.failIssueDraftStep(ctx, session.WorkspaceID, session.ID, "write_spec", err)
+		return h.failIssueDraftSession(ctx, session.WorkspaceID, session.ID, err)
+	}
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "write_spec", "succeeded", specPath, map[string]any{"path": specPath}, ""); err != nil {
+		return bundle, err
+	}
+
+	remoteURL := ""
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "create_remote_issue", "running", "", nil, ""); err != nil {
+		return bundle, err
+	}
+	remoteURL, err = createRemoteIssue(ctx, session.PrimaryLocalPathSnapshot, issueTitle, remoteIssue.Content)
+	if err != nil {
+		_ = h.failIssueDraftStep(ctx, session.WorkspaceID, session.ID, "create_remote_issue", err)
+		return h.failIssueDraftSession(ctx, session.WorkspaceID, session.ID, err)
+	}
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "create_remote_issue", "succeeded", remoteURL, map[string]any{"url": remoteURL}, ""); err != nil {
+		return bundle, err
+	}
+
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "commit_and_push", "running", "", nil, ""); err != nil {
+		return bundle, err
+	}
+	commitSHA, err := commitAndPushIssueDraftSpec(ctx, session.PrimaryLocalPathSnapshot, specPath, identifier)
+	if err != nil {
+		_ = h.failIssueDraftStep(ctx, session.WorkspaceID, session.ID, "commit_and_push", err)
+		return h.failIssueDraftSession(ctx, session.WorkspaceID, session.ID, err)
+	}
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "commit_and_push", "succeeded", commitSHA, map[string]any{"commit_sha": commitSHA}, ""); err != nil {
+		return bundle, err
+	}
+
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "link_outputs", "running", "", nil, ""); err != nil {
+		return bundle, err
+	}
+	if _, err := h.Queries.MarkIssueDraftCreated(ctx, db.MarkIssueDraftCreatedParams{
+		ID:             session.ID,
+		WorkspaceID:    session.WorkspaceID,
+		CreatedIssueID: issue.ID,
+		RemoteIssueUrl: remoteURL,
+		SpecFilePath:   specPath,
+		GitCommitSha:   commitSHA,
+	}); err != nil {
+		_ = h.failIssueDraftStep(ctx, session.WorkspaceID, session.ID, "link_outputs", err)
+		return h.failIssueDraftSession(ctx, session.WorkspaceID, session.ID, err)
+	}
+	if err := h.markIssueDraftStep(ctx, session.WorkspaceID, session.ID, "link_outputs", "succeeded", uuidToString(issue.ID), map[string]any{
+		"issue_id":         uuidToString(issue.ID),
+		"issue_identifier": identifier,
+		"remote_issue_url": remoteURL,
+		"spec_file_path":   specPath,
+		"git_commit_sha":   commitSHA,
+	}, ""); err != nil {
+		return bundle, err
+	}
+	return h.IssueDraftService.GetSessionBundle(ctx, session.WorkspaceID, session.ID)
+}
+
+func latestIssueDraftArtifact(artifacts []db.IssueDraftArtifact, kind string) (db.IssueDraftArtifact, bool) {
+	var latest db.IssueDraftArtifact
+	found := false
+	for _, artifact := range artifacts {
+		if artifact.ArtifactType != kind {
+			continue
+		}
+		if !found || artifact.Revision > latest.Revision {
+			latest = artifact
+			found = true
+		}
+	}
+	return latest, found
+}
+
+func issueDraftTitle(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return ""
+}
+
+func writeIssueDraftSpecFile(repoPath, identifier, content string) (string, error) {
+	repoPath = filepath.Clean(strings.TrimSpace(repoPath))
+	if repoPath == "." || repoPath == "" {
+		return "", fmt.Errorf("target repository path is empty")
+	}
+	specDir := filepath.Join(repoPath, ".spec", "issues")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		return "", fmt.Errorf("create spec directory: %w", err)
+	}
+	specPath := filepath.Join(specDir, safeIssueDraftFilename(identifier)+".md")
+	if err := os.WriteFile(specPath, []byte(strings.TrimSpace(content)+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("write spec file: %w", err)
+	}
+	return specPath, nil
+}
+
+func safeIssueDraftFilename(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "issue-draft"
+	}
+	return out
+}
+
+func createRemoteIssue(ctx context.Context, repoPath, title, body string) (string, error) {
+	repoPath = filepath.Clean(strings.TrimSpace(repoPath))
+	if repoPath == "." || repoPath == "" {
+		return "", fmt.Errorf("target repository path is empty")
+	}
+	bodyFile, err := os.CreateTemp("", "multica-remote-issue-*.md")
+	if err != nil {
+		return "", fmt.Errorf("create remote issue body file: %w", err)
+	}
+	defer os.Remove(bodyFile.Name())
+	if _, err := bodyFile.WriteString(strings.TrimSpace(body) + "\n"); err != nil {
+		bodyFile.Close()
+		return "", fmt.Errorf("write remote issue body file: %w", err)
+	}
+	if err := bodyFile.Close(); err != nil {
+		return "", fmt.Errorf("close remote issue body file: %w", err)
+	}
+	remote, err := runCommand(ctx, repoPath, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	remote = strings.TrimSpace(remote)
+	switch {
+	case strings.Contains(remote, "github.com"):
+		out, err := runCommand(ctx, repoPath, "gh", "issue", "create", "--title", title, "--body-file", bodyFile.Name())
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(out), nil
+	case strings.Contains(remote, "gitlab"):
+		out, err := runCommand(ctx, repoPath, "glab", "issue", "create", "--title", title, "--description-file", bodyFile.Name())
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(out), nil
+	default:
+		return "", fmt.Errorf("unsupported git remote for remote issue creation: %s", remote)
+	}
+}
+
+func commitAndPushIssueDraftSpec(ctx context.Context, repoPath, specPath, identifier string) (string, error) {
+	if _, err := runCommand(ctx, repoPath, "git", "add", specPath); err != nil {
+		return "", err
+	}
+	if _, err := runCommand(ctx, repoPath, "git", "commit", "-m", "docs: add spec for "+identifier); err != nil {
+		return "", err
+	}
+	sha, err := runCommand(ctx, repoPath, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if _, err := runCommand(ctx, repoPath, "git", "push"); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(sha), nil
+}
+
+func runCommand(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = strings.TrimSpace(stdout.String())
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("%s %s failed: %s", name, strings.Join(args, " "), msg)
+	}
+	return stdout.String(), nil
+}
+
+func (h *Handler) markIssueDraftStep(ctx context.Context, workspaceID, sessionID pgtype.UUID, step, status, externalID string, metadata map[string]any, errText string) error {
+	raw := []byte(`{}`)
+	if metadata != nil {
+		var err error
+		raw, err = json.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("marshal step metadata: %w", err)
+		}
+	}
+	_, err := h.Queries.UpsertIssueDraftConfirmStep(ctx, db.UpsertIssueDraftConfirmStepParams{
+		SessionID:      sessionID,
+		WorkspaceID:    workspaceID,
+		Step:           step,
+		Status:         status,
+		ExternalID:     externalID,
+		ResultMetadata: raw,
+		Error:          errText,
+	})
+	if err != nil {
+		return fmt.Errorf("update confirm step %s: %w", step, err)
+	}
+	return nil
+}
+
+func (h *Handler) failIssueDraftStep(ctx context.Context, workspaceID, sessionID pgtype.UUID, step string, stepErr error) error {
+	return h.markIssueDraftStep(ctx, workspaceID, sessionID, step, "failed", "", nil, stepErr.Error())
+}
+
+func (h *Handler) failIssueDraftSession(ctx context.Context, workspaceID, sessionID pgtype.UUID, cause error) (issuedraft.SessionBundle, error) {
+	_, _ = h.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+		Status:      issuedraft.StatusFailed,
+		LastError:   cause.Error(),
+	})
+	bundle, err := h.IssueDraftService.GetSessionBundle(ctx, workspaceID, sessionID)
+	if err != nil {
+		return issuedraft.SessionBundle{}, cause
+	}
+	return bundle, cause
 }
