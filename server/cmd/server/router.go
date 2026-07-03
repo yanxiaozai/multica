@@ -963,6 +963,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Issue draft sessions
+			r.Route("/api/issue-drafts", func(r chi.Router) {
+				r.Post("/", h.CreateIssueDraft)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueDraft)
+					r.Post("/messages", h.AppendIssueDraftMessage)
+					r.Post("/delegate", h.DelegateIssueDraft)
+					r.Post("/generate", h.GenerateIssueDraft)
+					r.Post("/confirm", h.ConfirmIssueDraft)
+					r.Post("/cancel", h.CancelIssueDraft)
+				})
+			})
+
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
 
