@@ -168,6 +168,8 @@
       "switch_tooltip": "이슈 생성을 위한 다중 턴 스쿼드 확인으로 전환합니다",
       "drafts": "초안",
       "no_drafts": "완료되지 않은 초안이 없습니다.",
+      "delete": "초안 삭제",
+      "deleting": "삭제 중...",
       "hint_project": "먼저 프로젝트를 선택하세요. 자세한 .spec은 해당 프로젝트의 메인 저장소에 작성됩니다.",
       "hint_squad": "먼저 담당자를 스쿼드로 설정하세요.",
       "hint_ready": "스쿼드 확인을 시작할 수 있습니다. 아래 버튼으로 일반 이슈를 바로 만들 수도 있습니다.",
@@ -187,7 +189,9 @@
       "artifacts": "생성된 내용",
       "reply_placeholder": "스쿼드에 답장...",
       "send": "보내기",
-      "toast_started": "이슈 초안 세션을 시작했습니다"
+      "toast_started": "이슈 초안 세션을 시작했습니다",
+      "toast_deleted": "초안을 삭제했습니다",
+      "toast_delete_failed": "초안을 삭제하지 못했습니다"
     },
     "switch_to_agent": "에이전트로 전환",
     "switch_to_agent_tooltip": "에이전트로 만들기로 전환합니다. 한 줄로 설명하면 에이전트가 이슈를 작성합니다.",

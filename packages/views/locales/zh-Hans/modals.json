@@ -168,6 +168,8 @@
       "switch_tooltip": "切换到小队多轮澄清创建 issue",
       "drafts": "草稿",
       "no_drafts": "暂无未完成草稿。",
+      "delete": "删除草稿",
+      "deleting": "删除中...",
       "hint_project": "先选择项目，详细 .spec 会写入这个项目的主仓库。",
       "hint_squad": "先把 assignee 选择为小队。",
       "hint_ready": "可以开启小队澄清；底部按钮仍可直接创建普通 issue。",
@@ -187,7 +189,9 @@
       "artifacts": "生成内容",
       "reply_placeholder": "回复小队...",
       "send": "发送",
-      "toast_started": "已开启 issue 草稿会话"
+      "toast_started": "已开启 issue 草稿会话",
+      "toast_deleted": "已删除草稿",
+      "toast_delete_failed": "删除草稿失败"
     },
     "switch_to_agent": "切换到智能体",
     "switch_to_agent_tooltip": "切换到通过智能体创建——一句话描述，让它替你建",

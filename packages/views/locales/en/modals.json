@@ -170,6 +170,8 @@
       "switch_tooltip": "Switch to multi-turn squad clarification for issue creation",
       "drafts": "Drafts",
       "no_drafts": "No unfinished drafts.",
+      "delete": "Delete draft",
+      "deleting": "Deleting...",
       "hint_project": "Select a project first. The detailed .spec will be written to that project's main repository.",
       "hint_squad": "Set the assignee to a squad first.",
       "hint_ready": "Start squad clarification here. The bottom button can still create a normal issue directly.",
@@ -189,7 +191,9 @@
       "artifacts": "Generated content",
       "reply_placeholder": "Reply to the squad...",
       "send": "Send",
-      "toast_started": "Issue draft session started"
+      "toast_started": "Issue draft session started",
+      "toast_deleted": "Draft deleted",
+      "toast_delete_failed": "Failed to delete draft"
     },
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",

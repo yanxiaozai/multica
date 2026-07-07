@@ -47,8 +47,18 @@ export function useConfirmIssueDraft(id: string) {
   return useIssueDraftAction(id, () => api.confirmIssueDraft(id));
 }
 
-export function useCancelIssueDraft(id: string) {
-  return useIssueDraftAction(id, () => api.cancelIssueDraft(id));
+export function useCancelIssueDraft(id = "") {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (overrideId?: string) => api.cancelIssueDraft(overrideId ?? id),
+    onSuccess: (bundle) => {
+      qc.setQueryData(issueDraftKeys.detail(wsId, bundle.session.id), bundle);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueDraftKeys.all(wsId) });
+    },
+  });
 }
 
 function useIssueDraftAction(id: string, action: () => Promise<IssueDraftBundle>) {

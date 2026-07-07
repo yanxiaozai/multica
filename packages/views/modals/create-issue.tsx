@@ -17,6 +17,7 @@ import {
   Minimize2,
   MoreHorizontal,
   Sparkles,
+  Trash2,
   Users,
   X as XIcon,
 } from "lucide-react";
@@ -52,7 +53,7 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { useCreateIssueDraft, useAppendIssueDraftMessage, useDelegateIssueDraft, useGenerateIssueDraft, useConfirmIssueDraft } from "@multica/core/issue-drafts/mutations";
+import { useCreateIssueDraft, useAppendIssueDraftMessage, useDelegateIssueDraft, useGenerateIssueDraft, useConfirmIssueDraft, useCancelIssueDraft } from "@multica/core/issue-drafts/mutations";
 import { issueDraftListQueryOptions, issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
 import { squadListOptions } from "@multica/core/workspace/queries";
 import {
@@ -934,12 +935,16 @@ export function SquadIssueDraftPanel({
     issueDraftSessionId ?? null,
   );
   const [reply, setReply] = useState("");
+  const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null);
+  const [deletedDraftIds, setDeletedDraftIds] = useState<string[]>([]);
 
   const { data: draftList } = useQuery(issueDraftListQueryOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const selectedSquadId = assigneeType === "squad" ? squadId : undefined;
   const selectedSquad = squads.find((s) => s.id === selectedSquadId);
-  const sessions = draftList?.sessions ?? [];
+  const sessions = (draftList?.sessions ?? []).filter(
+    (session) => !deletedDraftIds.includes(session.id),
+  );
 
   useEffect(() => {
     if (selectedDraftId) return;
@@ -969,6 +974,7 @@ export function SquadIssueDraftPanel({
   const delegateIssueDraft = useDelegateIssueDraft(selectedDraftId ?? "");
   const generateIssueDraft = useGenerateIssueDraft(selectedDraftId ?? "");
   const confirmIssueDraft = useConfirmIssueDraft(selectedDraftId ?? "");
+  const cancelIssueDraft = useCancelIssueDraft();
 
   const activeTask = draftBundle?.member_tasks.find((task) =>
     task.status === "queued" || task.status === "running",
@@ -1032,30 +1038,80 @@ export function SquadIssueDraftPanel({
     }
   };
 
+  const deleteDraft = async (session: IssueDraftSession) => {
+    if (deletingDraftId) return;
+    setDeletingDraftId(session.id);
+    try {
+      await cancelIssueDraft.mutateAsync(session.id);
+      const next = sessions.find((candidate) => candidate.id !== session.id);
+      setDeletedDraftIds((prev) =>
+        prev.includes(session.id) ? prev : [...prev, session.id],
+      );
+      if (selectedDraftId === session.id) {
+        setSelectedDraftId(next?.id ?? null);
+        setIssueDraftSessionId(next?.id);
+      }
+      toast.success(t(($) => $.create_issue.issue_draft.toast_deleted));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.create_issue.issue_draft.toast_delete_failed),
+      );
+    } finally {
+      setDeletingDraftId(null);
+    }
+  };
+
   const renderDraftListItem = (session: IssueDraftSession) => {
     const isSelected = session.id === selectedDraftId;
     const squadName = getActorName("squad", session.squad_id);
+    const isDeleting = deletingDraftId === session.id;
     return (
-      <button
+      <div
         key={session.id}
-        type="button"
-        onClick={() => selectDraft(session)}
         className={cn(
-          "w-full rounded-md border px-3 py-2 text-left transition-colors",
+          "flex w-full items-stretch overflow-hidden rounded-md border transition-colors",
           isSelected ? "border-brand/50 bg-brand/10" : "bg-background hover:bg-accent/60",
         )}
       >
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="truncate font-medium">{squadName}</span>
-          <span className={cn("shrink-0", draftStatusTone(session.status))}>
-            {session.status}
-          </span>
-        </div>
-        <div className="mt-1 flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-          <Clock3 className="size-3" />
-          <span>{formatDraftTime(session.updated_at || session.created_at)}</span>
-        </div>
-      </button>
+        <button
+          type="button"
+          onClick={() => selectDraft(session)}
+          className="min-w-0 flex-1 px-3 py-2 text-left"
+        >
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="truncate font-medium">{squadName}</span>
+            <span className={cn("shrink-0", draftStatusTone(session.status))}>
+              {session.status}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+            <Clock3 className="size-3" />
+            <span>{formatDraftTime(session.updated_at || session.created_at)}</span>
+          </div>
+        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => deleteDraft(session)}
+                disabled={isDeleting}
+                className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t(($) => $.create_issue.issue_draft.delete)}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            }
+          />
+          <TooltipContent side="right">
+            {isDeleting
+              ? t(($) => $.create_issue.issue_draft.deleting)
+              : t(($) => $.create_issue.issue_draft.delete)}
+          </TooltipContent>
+        </Tooltip>
+      </div>
     );
   };
 
