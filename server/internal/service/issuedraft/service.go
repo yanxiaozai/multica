@@ -437,18 +437,18 @@ func (s *Service) requireLatestArtifact(ctx context.Context, workspaceID, sessio
 }
 
 func buildTemplateInput(session db.IssueDraftSession, messages []db.IssueDraftMessage, memberTasks []db.IssueDraftMemberTask) TemplateInput {
-	userText := collectMessages(messages, AuthorMember)
+	userLines := collectMessageLines(messages, AuthorMember)
 	findings := collectFindings(memberTasks)
-	title := firstNonEmptyLine(userText)
+	title := titleFromRequirementLines(userLines)
 	if title == "" {
 		title = "新建 issue 需求草稿"
 	}
-	background := "用户原始需求:\n\n" + fallback(userText, "TBD")
+	background := renderIssueBackground(title, userLines, findings)
 	if findings != "" {
-		background += "\n\n小队成员发现:\n\n" + findings
+		background += "\n\n代码与接口线索:\n\n" + findings
 	}
 	specPathHint := strings.TrimRight(session.PrimaryLocalPathSnapshot, "/") + "/.spec/"
-	goal := "根据用户需求交付: " + fallback(strings.TrimPrefix(userText, "- "), title)
+	goal := renderIssueGoal(title, userLines)
 	return TemplateInput{
 		Title:                title,
 		Background:           background,
@@ -457,8 +457,8 @@ func buildTemplateInput(session db.IssueDraftSession, messages []db.IssueDraftMe
 		Goal:                 goal,
 		NonGoal:              "不在远端 issue 中写入详细实施计划；不允许澄清阶段任务修改代码、提交 git 或创建外部资源。",
 		ImpactScope:          fmt.Sprintf("目标项目主仓库: `%s`\n详细版本写入: `%s`", session.PrimaryLocalPathSnapshot, specPathHint),
-		UserScenario:         "用户提出需求后，系统进入澄清会话，成员根据技能补充问题/代码证据，最终生成可确认的标准模板。\n\n用户需求摘要:\n\n" + fallback(userText, "TBD"),
-		AcceptanceCriteria:   []string{"满足用户原始需求: " + title, "必要的影响范围、验收标准、技术约束已被澄清", "生成的详细版本写入目标项目 .spec", "远端 issue 和提交信息不包含详细实施计划", "用户确认后才进入创建/同步步骤"},
+		UserScenario:         renderUserScenario(userLines),
+		AcceptanceCriteria:   renderAcceptanceCriteria(title, userLines),
 		TechnicalConstraints: "React Query 管理服务端 issue draft 状态；Zustand 只保存本地选择/草稿 UI 状态；小队成员任务必须使用 issue_draft 只读上下文。",
 		DesignRecord:         "草稿会话持久化为 issue_draft_session；成员任务、对话消息、artifact、确认步骤分别记录，便于审计与重试。",
 		ImplementationPlan:   "1. 创建 issue draft session 并绑定项目主仓库 local_directory resource。\n2. 按小队成员创建只读 member task，并下发包含真实技能/仓库路径/会话上下文的 prompt。\n3. 汇总对话与 findings，生成 detailed_spec / multica_issue / remote_issue 三类 artifact。\n4. 用户确认后，详细 spec 写入目标仓库 .spec，远端 issue 使用简版正文。\n5. 执行创建 issue、提交并推送目标仓库，记录每个确认步骤结果。",
@@ -470,6 +470,28 @@ func buildTemplateInput(session db.IssueDraftSession, messages []db.IssueDraftMe
 		PMCreatedAt:          pgTime(session.CreatedAt),
 		ArchitectAlignedAt:   time.Now(),
 	}
+}
+
+func collectMessageLines(messages []db.IssueDraftMessage, authorType string) []string {
+	seen := make(map[string]struct{})
+	lines := make([]string, 0)
+	for _, msg := range messages {
+		if msg.AuthorType != authorType && authorType != "" {
+			continue
+		}
+		for _, line := range strings.Split(msg.Content, "\n") {
+			line = cleanRequirementLine(line)
+			if line == "" {
+				continue
+			}
+			if _, ok := seen[line]; ok {
+				continue
+			}
+			seen[line] = struct{}{}
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 func collectMessages(messages []db.IssueDraftMessage, authorType string) string {
@@ -487,6 +509,116 @@ func collectMessages(messages []db.IssueDraftMessage, authorType string) string 
 		b.WriteByte('\n')
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func renderIssueBackground(title string, lines []string, findings string) string {
+	parts := []string{
+		"需要围绕 `" + title + "` 整理为一条可执行、可验证的产品需求，明确入口、字段、状态限制、保存后行为和接口对齐要求。",
+	}
+	if len(lines) > 0 {
+		parts = append(parts, "已澄清的需求要点:\n\n"+renderBulletLines(lines, 8))
+	}
+	if strings.TrimSpace(findings) != "" {
+		parts = append(parts, "小队已补充现有代码/接口线索，实施时需要优先对齐这些证据。")
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func renderIssueGoal(title string, lines []string) string {
+	goal := "交付 `" + title + "` 的完整业务流程。"
+	if len(lines) == 0 {
+		return goal
+	}
+	return goal + "\n\n核心结果:\n\n" + renderBulletLines(lines, 6)
+}
+
+func renderUserScenario(lines []string) string {
+	if len(lines) == 0 {
+		return "用户从业务入口进入流程，填写必要信息后保存，系统返回来源页面并刷新相关视图。"
+	}
+	return "业务用户从指定入口进入流程，按照页面字段完成操作；保存成功后返回来源页面，并看到相关视图刷新。\n\n场景要点:\n\n" + renderBulletLines(lines, 6)
+}
+
+func renderAcceptanceCriteria(title string, lines []string) []string {
+	items := []string{
+		"可以从指定入口进入 `" + title + "` 相关流程",
+		"保存成功后返回来源页面，并触发相关视图刷新",
+	}
+	if containsAnyLine(lines, "已取消", "已完成", "已使用", "不可修改") {
+		items = append(items, "已取消、已完成、已使用等不可编辑状态不允许修改")
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "客户") || strings.Contains(line, "memberId") || strings.Contains(line, "手机号") {
+			items = append(items, "客户字段包含 memberId、姓名、手机号、会员等级等必要信息")
+			break
+		}
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "接口") || strings.Contains(line, "字段") || strings.Contains(line, "work-contact") {
+			items = append(items, "请求字段与 work-contact 预约创建接口对齐")
+			break
+		}
+	}
+	return items
+}
+
+func containsAnyLine(lines []string, values ...string) bool {
+	for _, line := range lines {
+		for _, value := range values {
+			if strings.Contains(line, value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func renderBulletLines(lines []string, limit int) string {
+	if limit <= 0 || limit > len(lines) {
+		limit = len(lines)
+	}
+	var b strings.Builder
+	for _, line := range lines[:limit] {
+		b.WriteString("- ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func titleFromRequirementLines(lines []string) string {
+	for _, line := range lines {
+		title := firstNonEmptyLine(line)
+		if title != "" {
+			return title
+		}
+	}
+	return ""
+}
+
+func cleanRequirementLine(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "-*# ")
+	line = strings.TrimSpace(line)
+	for {
+		dot := strings.Index(line, ".")
+		if dot <= 0 || dot > 2 {
+			break
+		}
+		prefix := line[:dot]
+		allDigits := true
+		for _, r := range prefix {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if !allDigits {
+			break
+		}
+		line = strings.TrimSpace(line[dot+1:])
+	}
+	return line
 }
 
 func collectFindings(tasks []db.IssueDraftMemberTask) string {

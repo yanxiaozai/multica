@@ -4,7 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -72,5 +74,44 @@ func TestRenderRemoteIssueOmitsImplementationPlan(t *testing.T) {
 	}
 	if !strings.Contains(out, "The detailed implementation plan is stored in the target repository .spec file") {
 		t.Fatalf("RenderRemoteIssue() missing .spec pointer:\n%s", out)
+	}
+}
+
+func TestBuildTemplateInputSummarizesConversationIntoIssue(t *testing.T) {
+	in := buildTemplateInput(
+		db.IssueDraftSession{
+			PrimaryLocalPathSnapshot: "/Users/example/lms-mini",
+			CreatedAt:                pgtype.Timestamptz{Time: time.Date(2026, 7, 7, 18, 16, 0, 0, time.UTC), Valid: true},
+		},
+		[]db.IssueDraftMessage{
+			{AuthorType: AuthorMember, Content: "预约「立即预约创建流程」+修改/"},
+			{AuthorType: AuthorMember, Content: "1.新增“立即预约创建流程”\n2.预约概览\n3.需要查看work-module的接口"},
+			{AuthorType: AuthorMember, Content: "1.客户列表页。`memberId`、客户姓名、手机号、会员等级都要\n2.如果来源是预约概览，要求下次进入日历自动刷新即可"},
+		},
+		[]db.IssueDraftMemberTask{
+			{Findings: "work-contact 存在预约创建接口，状态 WAIT_USED 表示已使用。"},
+		},
+	)
+
+	out := RenderMulticaIssue(in)
+	for _, forbidden := range []string{
+		"用户原始需求:",
+		"- 1.新增",
+		"- 1.客户列表页",
+		"小队成员发现:",
+	} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("RenderMulticaIssue() leaked raw conversation marker %q in:\n%s", forbidden, out)
+		}
+	}
+	for _, want := range []string{
+		"已澄清的需求要点",
+		"立即预约创建流程",
+		"客户字段包含 memberId、姓名、手机号、会员等级等必要信息",
+		"相关视图刷新",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("RenderMulticaIssue() missing summarized issue content %q in:\n%s", want, out)
+		}
 	}
 }
