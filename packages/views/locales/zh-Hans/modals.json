@@ -187,11 +187,14 @@
       "select_or_start": "选择一个草稿，或先开始新的小队澄清。",
       "loading": "加载草稿中...",
       "artifacts": "生成内容",
+      "copy_artifact": "复制全文",
       "reply_placeholder": "回复小队...",
       "send": "发送",
       "toast_started": "已开启 issue 草稿会话",
       "toast_deleted": "已删除草稿",
-      "toast_delete_failed": "删除草稿失败"
+      "toast_delete_failed": "删除草稿失败",
+      "toast_copied": "已复制全文",
+      "toast_copy_failed": "复制失败"
     },
     "switch_to_agent": "切换到智能体",
     "switch_to_agent_tooltip": "切换到通过智能体创建——一句话描述，让它替你建",

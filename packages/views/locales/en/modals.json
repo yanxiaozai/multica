@@ -189,11 +189,14 @@
       "select_or_start": "Select a draft, or start a new squad clarification.",
       "loading": "Loading draft...",
       "artifacts": "Generated content",
+      "copy_artifact": "Copy full text",
       "reply_placeholder": "Reply to the squad...",
       "send": "Send",
       "toast_started": "Issue draft session started",
       "toast_deleted": "Draft deleted",
-      "toast_delete_failed": "Failed to delete draft"
+      "toast_delete_failed": "Failed to delete draft",
+      "toast_copied": "Full text copied",
+      "toast_copy_failed": "Failed to copy"
     },
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",

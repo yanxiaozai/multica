@@ -187,11 +187,14 @@
       "select_or_start": "草稿を選択するか、新しいスクワッド確認を開始してください。",
       "loading": "草稿を読み込み中...",
       "artifacts": "生成内容",
+      "copy_artifact": "全文をコピー",
       "reply_placeholder": "スクワッドに返信...",
       "send": "送信",
       "toast_started": "イシュー草稿セッションを開始しました",
       "toast_deleted": "草稿を削除しました",
-      "toast_delete_failed": "草稿を削除できませんでした"
+      "toast_delete_failed": "草稿を削除できませんでした",
+      "toast_copied": "全文をコピーしました",
+      "toast_copy_failed": "コピーできませんでした"
     },
     "switch_to_agent": "エージェントに切り替え",
     "switch_to_agent_tooltip": "エージェントで作成に切り替えます。一行で説明すれば、エージェントがイシューを作成します",

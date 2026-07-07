@@ -12,6 +12,7 @@ import {
   Check,
   ChevronRight,
   Clock3,
+  Copy,
   Maximize2,
   MessageSquareText,
   Minimize2,
@@ -937,6 +938,7 @@ export function SquadIssueDraftPanel({
   const [reply, setReply] = useState("");
   const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null);
   const [deletedDraftIds, setDeletedDraftIds] = useState<string[]>([]);
+  const [expandedArtifactIds, setExpandedArtifactIds] = useState<string[]>([]);
 
   const { data: draftList } = useQuery(issueDraftListQueryOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
@@ -1035,6 +1037,21 @@ export function SquadIssueDraftPanel({
     if (bundle.session.status === "created") {
       setSelectedDraftId(null);
       setIssueDraftSessionId(undefined);
+    }
+  };
+
+  const toggleArtifact = (id: string) => {
+    setExpandedArtifactIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const copyArtifact = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success(t(($) => $.create_issue.issue_draft.toast_copied));
+    } catch {
+      toast.error(t(($) => $.create_issue.issue_draft.toast_copy_failed));
     }
   };
 
@@ -1316,15 +1333,58 @@ export function SquadIssueDraftPanel({
                       <MessageSquareText className="size-3.5" />
                       {t(($) => $.create_issue.issue_draft.artifacts)}
                     </div>
-                    {draftBundle.artifacts.slice(0, 4).map((artifact) => (
-                      <div key={artifact.id} className="grid gap-0.5 text-xs">
-                        <div className="flex items-center justify-between gap-2">
-                          <span>{artifact.artifact_type} v{artifact.revision}</span>
-                          <span className="text-muted-foreground">{formatDraftTime(artifact.created_at)}</span>
+                    {draftBundle.artifacts.slice(0, 4).map((artifact) => {
+                      const expanded = expandedArtifactIds.includes(artifact.id);
+                      return (
+                        <div key={artifact.id} className="grid gap-2 rounded border bg-muted/10 p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleArtifact(artifact.id)}
+                              className="flex min-w-0 items-center gap-1.5 text-left font-medium hover:text-foreground"
+                              aria-expanded={expanded}
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  "size-3 shrink-0 transition-transform",
+                                  expanded && "rotate-90",
+                                )}
+                              />
+                              <span className="truncate">
+                                {artifact.artifact_type} v{artifact.revision}
+                              </span>
+                            </button>
+                            <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
+                              <span>{formatDraftTime(artifact.created_at)}</span>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <button
+                                      type="button"
+                                      onClick={() => copyArtifact(artifact.content)}
+                                      className="rounded-sm p-1 transition-colors hover:bg-accent hover:text-foreground"
+                                      aria-label={t(($) => $.create_issue.issue_draft.copy_artifact)}
+                                    >
+                                      <Copy className="size-3.5" />
+                                    </button>
+                                  }
+                                />
+                                <TooltipContent side="left">
+                                  {t(($) => $.create_issue.issue_draft.copy_artifact)}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                          {expanded ? (
+                            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-background p-3 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
+                              {artifact.content}
+                            </pre>
+                          ) : (
+                            <p className="truncate text-muted-foreground">{firstLine(artifact.content)}</p>
+                          )}
                         </div>
-                        <p className="truncate text-muted-foreground">{firstLine(artifact.content)}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 

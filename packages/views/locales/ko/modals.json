@@ -187,11 +187,14 @@
       "select_or_start": "초안을 선택하거나 새 스쿼드 확인을 시작하세요.",
       "loading": "초안을 불러오는 중...",
       "artifacts": "생성된 내용",
+      "copy_artifact": "전체 텍스트 복사",
       "reply_placeholder": "스쿼드에 답장...",
       "send": "보내기",
       "toast_started": "이슈 초안 세션을 시작했습니다",
       "toast_deleted": "초안을 삭제했습니다",
-      "toast_delete_failed": "초안을 삭제하지 못했습니다"
+      "toast_delete_failed": "초안을 삭제하지 못했습니다",
+      "toast_copied": "전체 텍스트를 복사했습니다",
+      "toast_copy_failed": "복사하지 못했습니다"
     },
     "switch_to_agent": "에이전트로 전환",
     "switch_to_agent_tooltip": "에이전트로 만들기로 전환합니다. 한 줄로 설명하면 에이전트가 이슈를 작성합니다.",
