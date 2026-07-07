@@ -258,6 +258,17 @@ func (h *Handler) AppendIssueDraftMessage(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to append issue draft message")
 		return
 	}
+	if _, _, _, err := h.delegateIssueDraft(r.Context(), workspaceUUID, sessionID, DelegateIssueDraftRequest{
+		Prompt: "用户补充了新的需求信息。请基于最新完整对话继续澄清；如果信息已经足够，请给出可生成 issue 草稿的结论。",
+	}); err != nil {
+		_, _ = h.IssueDraftService.AppendMessage(r.Context(), issuedraft.AppendMessageInput{
+			SessionID:   sessionID,
+			WorkspaceID: workspaceUUID,
+			AuthorType:  issuedraft.AuthorSystem,
+			MessageType: issuedraft.MessageError,
+			Content:     "已保存回复，但自动继续澄清失败：" + err.Error(),
+		})
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"message": issueDraftMessageToResponse(msg)})
 }
 
@@ -270,15 +281,40 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	bundle, err := h.IssueDraftService.GetSessionBundle(r.Context(), workspaceUUID, sessionID)
+	updated, queued, alreadyActive, err := h.delegateIssueDraft(r.Context(), workspaceUUID, sessionID, req)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "issue draft not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue draft not found")
+			return
+		}
+		if errors.Is(err, errNoIssueDraftDelegateAgents) {
+			writeError(w, http.StatusConflict, "no squad agents were available to delegate")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	members, err := h.Queries.ListSquadMembers(r.Context(), bundle.Session.SquadID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list squad members")
+	if alreadyActive {
+		writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(updated))
 		return
+	}
+	if queued == 0 {
+		writeError(w, http.StatusConflict, "no squad agents were available to delegate")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(updated))
+}
+
+var errNoIssueDraftDelegateAgents = errors.New("no squad agents were available to delegate")
+
+func (h *Handler) delegateIssueDraft(ctx context.Context, workspaceUUID, sessionID pgtype.UUID, req DelegateIssueDraftRequest) (issuedraft.SessionBundle, int, bool, error) {
+	bundle, err := h.IssueDraftService.GetSessionBundle(ctx, workspaceUUID, sessionID)
+	if err != nil {
+		return issuedraft.SessionBundle{}, 0, false, fmt.Errorf("issue draft not found: %w", err)
+	}
+	members, err := h.Queries.ListSquadMembers(ctx, bundle.Session.SquadID)
+	if err != nil {
+		return issuedraft.SessionBundle{}, 0, false, fmt.Errorf("failed to list squad members: %w", err)
 	}
 	agentFilter := make(map[string]struct{}, len(req.Agents))
 	for _, id := range req.Agents {
@@ -293,8 +329,7 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 	for _, task := range bundle.MemberTasks {
 		if task.Status == "queued" || task.Status == "running" {
 			if _, ok := agentFilter[uuidToString(task.AgentID)]; ok {
-				writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(bundle))
-				return
+				return bundle, 0, true, nil
 			}
 		}
 	}
@@ -309,7 +344,7 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 			ID:          member.MemberID,
 			WorkspaceID: workspaceUUID,
 		})
@@ -317,7 +352,7 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		readScope := json.RawMessage(fmt.Sprintf(`{"primary_local_path":%q,"mode":"read_only"}`, bundle.Session.PrimaryLocalPathSnapshot))
-		memberTask, err := h.Queries.CreateIssueDraftMemberTask(r.Context(), db.CreateIssueDraftMemberTaskParams{
+		memberTask, err := h.Queries.CreateIssueDraftMemberTask(ctx, db.CreateIssueDraftMemberTaskParams{
 			SessionID:   sessionID,
 			WorkspaceID: workspaceUUID,
 			AgentID:     member.MemberID,
@@ -329,7 +364,7 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		prompt := buildIssueDraftMemberPrompt(bundle, agent, member, req.Prompt)
-		task, err := h.TaskService.EnqueueIssueDraftTask(r.Context(), agent, service.IssueDraftContext{
+		task, err := h.TaskService.EnqueueIssueDraftTask(ctx, agent, service.IssueDraftContext{
 			WorkspaceID:      uuidToString(workspaceUUID),
 			SessionID:        uuidToString(sessionID),
 			ProjectID:        uuidToString(bundle.Session.ProjectID),
@@ -340,7 +375,7 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 			PrimaryLocalPath: bundle.Session.PrimaryLocalPathSnapshot,
 		})
 		if err != nil {
-			_, _ = h.Queries.UpdateIssueDraftMemberTaskStatus(r.Context(), db.UpdateIssueDraftMemberTaskStatusParams{
+			_, _ = h.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
 				ID:          memberTask.ID,
 				WorkspaceID: workspaceUUID,
 				Status:      "failed",
@@ -348,45 +383,40 @@ func (h *Handler) DelegateIssueDraft(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		if _, err := h.Queries.LinkIssueDraftMemberTaskQueueItem(r.Context(), db.LinkIssueDraftMemberTaskQueueItemParams{
+		if _, err := h.Queries.LinkIssueDraftMemberTaskQueueItem(ctx, db.LinkIssueDraftMemberTaskQueueItemParams{
 			ID:          memberTask.ID,
 			WorkspaceID: workspaceUUID,
 			TaskID:      task.ID,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to link issue draft task")
-			return
+			return issuedraft.SessionBundle{}, 0, false, fmt.Errorf("failed to link issue draft task: %w", err)
 		}
 		queued++
 	}
 	if queued == 0 {
-		writeError(w, http.StatusConflict, "no squad agents were available to delegate")
-		return
+		return issuedraft.SessionBundle{}, 0, false, errNoIssueDraftDelegateAgents
 	}
-	if _, err := h.IssueDraftService.AppendMessage(r.Context(), issuedraft.AppendMessageInput{
+	if _, err := h.IssueDraftService.AppendMessage(ctx, issuedraft.AppendMessageInput{
 		SessionID:   sessionID,
 		WorkspaceID: workspaceUUID,
 		AuthorType:  issuedraft.AuthorSystem,
 		MessageType: issuedraft.MessageStatus,
 		Content:     fmt.Sprintf("已派发 %d 个主要负责人只读澄清任务。", queued),
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to append issue draft status")
-		return
+		return issuedraft.SessionBundle{}, 0, false, fmt.Errorf("failed to append issue draft status: %w", err)
 	}
-	if _, err := h.Queries.UpdateIssueDraftSessionStatus(r.Context(), db.UpdateIssueDraftSessionStatusParams{
+	if _, err := h.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
 		ID:          sessionID,
 		WorkspaceID: workspaceUUID,
 		Status:      issuedraft.StatusDelegating,
 		LastError:   "",
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update issue draft")
-		return
+		return issuedraft.SessionBundle{}, 0, false, fmt.Errorf("failed to update issue draft: %w", err)
 	}
-	updated, err := h.IssueDraftService.GetSessionBundle(r.Context(), workspaceUUID, sessionID)
+	updated, err := h.IssueDraftService.GetSessionBundle(ctx, workspaceUUID, sessionID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load issue draft")
-		return
+		return issuedraft.SessionBundle{}, 0, false, fmt.Errorf("failed to load issue draft: %w", err)
 	}
-	writeJSON(w, http.StatusAccepted, issueDraftBundleToResponse(updated))
+	return updated, queued, false, nil
 }
 
 func (h *Handler) GenerateIssueDraft(w http.ResponseWriter, r *http.Request) {
