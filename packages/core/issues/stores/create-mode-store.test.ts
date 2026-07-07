@@ -30,6 +30,12 @@ describe("openCreateIssueWithPreference", () => {
     expect(useModalStore.getState().modal).toBe("create-issue");
   });
 
+  it("opens squad-issue-draft when last mode is squad draft", () => {
+    useCreateModeStore.getState().setLastMode("squad_draft");
+    openCreateIssueWithPreference();
+    expect(useModalStore.getState().modal).toBe("squad-issue-draft");
+  });
+
   it("forwards seed data to whichever modal is opened", () => {
     useCreateModeStore.getState().setLastMode("manual");
     openCreateIssueWithPreference({ project_id: "p1" });
@@ -40,5 +46,10 @@ describe("openCreateIssueWithPreference", () => {
     openCreateIssueWithPreference({ project_id: "p2" });
     expect(useModalStore.getState().modal).toBe("quick-create-issue");
     expect(useModalStore.getState().data).toEqual({ project_id: "p2" });
+
+    useCreateModeStore.getState().setLastMode("squad_draft");
+    openCreateIssueWithPreference({ project_id: "p3" });
+    expect(useModalStore.getState().modal).toBe("squad-issue-draft");
+    expect(useModalStore.getState().data).toEqual({ project_id: "p3" });
   });
 });

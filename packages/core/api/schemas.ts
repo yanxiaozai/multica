@@ -19,6 +19,7 @@ import type {
   GroupedIssuesResponse,
   GenerateSquadInstructionsResponse,
   IssueDraftBundle,
+  ListIssueDraftSessionsResponse,
   SquadInstructionsGenerationJob,
   IssueIntegration,
   IssueSyncConfig,
@@ -298,6 +299,10 @@ export const IssueDraftBundleSchema = z.object({
   confirm_steps: z.array(IssueDraftConfirmStepSchema).default([]),
 }).loose();
 
+export const ListIssueDraftSessionsResponseSchema = z.object({
+  sessions: z.array(IssueDraftSessionSchema).default([]),
+}).loose();
+
 export const EMPTY_ISSUE_DRAFT_BUNDLE: IssueDraftBundle = {
   session: {
     id: "",
@@ -321,6 +326,10 @@ export const EMPTY_ISSUE_DRAFT_BUNDLE: IssueDraftBundle = {
   member_tasks: [],
   artifacts: [],
   confirm_steps: [],
+};
+
+export const EMPTY_LIST_ISSUE_DRAFT_SESSIONS_RESPONSE: ListIssueDraftSessionsResponse = {
+  sessions: [],
 };
 
 export const CommentSchema = z.object({

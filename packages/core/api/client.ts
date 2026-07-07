@@ -150,6 +150,7 @@ import type {
   AppendIssueDraftMessageRequest,
   CreateIssueDraftRequest,
   IssueDraftBundle,
+  ListIssueDraftSessionsResponse,
   ListSpecDocumentsResponse,
   ListSpecEpicsResponse,
   ListSpecModulesResponse,
@@ -207,6 +208,7 @@ import {
   EMPTY_ISSUE_INTEGRATION,
   EMPTY_ISSUE_SYNC_CONFIG,
   EMPTY_ISSUE_DRAFT_BUNDLE,
+  EMPTY_LIST_ISSUE_DRAFT_SESSIONS_RESPONSE,
   EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE,
   EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -227,6 +229,7 @@ import {
   GroupedIssuesResponseSchema,
   IssueIntegrationResponseSchema,
   IssueDraftBundleSchema,
+  ListIssueDraftSessionsResponseSchema,
   IssueDraftMessageSchema,
   IssueSyncConfigResponseSchema,
   ListAutopilotsResponseSchema,
@@ -714,6 +717,16 @@ export class ApiClient {
     return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
       endpoint: "POST /api/issue-drafts",
     }) as IssueDraftBundle;
+  }
+
+  async listIssueDrafts(): Promise<ListIssueDraftSessionsResponse> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts");
+    return parseWithFallback(
+      raw,
+      ListIssueDraftSessionsResponseSchema,
+      EMPTY_LIST_ISSUE_DRAFT_SESSIONS_RESPONSE,
+      { endpoint: "GET /api/issue-drafts" },
+    ) as ListIssueDraftSessionsResponse;
   }
 
   async getIssueDraft(id: string): Promise<IssueDraftBundle> {

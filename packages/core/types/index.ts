@@ -9,6 +9,7 @@ export type {
   IssueDraftMessage,
   IssueDraftSession,
   IssueDraftStatus,
+  ListIssueDraftSessionsResponse,
 } from "./issue-draft";
 export type {
   Agent,

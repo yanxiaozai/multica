@@ -3,10 +3,19 @@ import { api } from "../api";
 
 export const issueDraftKeys = {
   all: (wsId: string) => ["issue-drafts", wsId] as const,
+  list: (wsId: string) => [...issueDraftKeys.all(wsId), "list"] as const,
   active: (wsId: string) => [...issueDraftKeys.all(wsId), "active"] as const,
   detail: (wsId: string, id: string) =>
     [...issueDraftKeys.all(wsId), "detail", id] as const,
 };
+
+export function issueDraftListQueryOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueDraftKeys.list(wsId),
+    queryFn: () => api.listIssueDrafts(),
+    enabled: Boolean(wsId),
+  });
+}
 
 export function activeIssueDraftQueryOptions(wsId: string) {
   return queryOptions({

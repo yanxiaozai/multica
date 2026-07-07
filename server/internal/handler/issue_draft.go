@@ -118,6 +118,37 @@ type IssueDraftBundleResponse struct {
 	ConfirmSteps []IssueDraftConfirmStepResponse `json:"confirm_steps"`
 }
 
+func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListIssueDraftSessions(r.Context(), db.ListIssueDraftSessionsParams{
+		WorkspaceID: workspaceUUID,
+		Limit:       50,
+		Offset:      0,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue drafts")
+		return
+	}
+
+	sessions := make([]IssueDraftSessionResponse, 0, len(rows))
+	for _, row := range rows {
+		if row.Status == "created" || row.Status == "cancelled" {
+			continue
+		}
+		sessions = append(sessions, issueDraftSessionToResponse(row))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
 func (h *Handler) CreateIssueDraft(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	member, ok := h.workspaceMember(w, r, workspaceID)

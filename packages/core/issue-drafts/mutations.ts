@@ -60,7 +60,7 @@ function useIssueDraftAction(id: string, action: () => Promise<IssueDraftBundle>
       qc.setQueryData(issueDraftKeys.detail(wsId, id), bundle);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueDraftKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: issueDraftKeys.all(wsId) });
     },
   });
 }

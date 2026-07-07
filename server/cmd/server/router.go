@@ -965,6 +965,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issue draft sessions
 			r.Route("/api/issue-drafts", func(r chi.Router) {
+				r.Get("/", h.ListIssueDrafts)
 				r.Post("/", h.CreateIssueDraft)
 				r.Get("/active", h.GetActiveIssueDraft)
 				r.Route("/{id}", func(r chi.Router) {

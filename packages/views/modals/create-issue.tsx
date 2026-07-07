@@ -11,14 +11,18 @@ import {
   CalendarClock,
   Check,
   ChevronRight,
+  Clock3,
   Maximize2,
+  MessageSquareText,
   Minimize2,
   MoreHorizontal,
+  Sparkles,
+  Users,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment, IssueDraftSession } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
@@ -49,7 +53,7 @@ import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/que
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useCreateIssueDraft, useAppendIssueDraftMessage, useDelegateIssueDraft, useGenerateIssueDraft, useConfirmIssueDraft } from "@multica/core/issue-drafts/mutations";
-import { activeIssueDraftQueryOptions, issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
+import { issueDraftListQueryOptions, issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
 import { squadListOptions } from "@multica/core/workspace/queries";
 import {
   api,
@@ -177,6 +181,7 @@ function CreateRunHint({
 export function ManualCreatePanel({
   onClose,
   onSwitchMode,
+  onSwitchSquadDraft,
   data,
   isExpanded,
   setIsExpanded,
@@ -184,6 +189,7 @@ export function ManualCreatePanel({
   onClose: () => void;
   /** Called with the carry payload to seed the agent panel after switch. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  onSwitchSquadDraft?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
   /** Lifted to the shell so DialogContent's mode-aware className can react
    *  without the body itself having to live inside DialogContent (which would
@@ -195,14 +201,11 @@ export function ManualCreatePanel({
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
-  const { getActorName } = useActorName();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
-  const issueDraftSessionId = useIssueDraftStore((s) => s.issueDraftSessionId);
-  const setIssueDraftSessionId = useIssueDraftStore((s) => s.setIssueDraftSessionId);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -251,8 +254,6 @@ export function ManualCreatePanel({
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
-  const [issueDraftId, setIssueDraftId] = useState<string | null>(issueDraftSessionId ?? null);
-  const [issueDraftReply, setIssueDraftReply] = useState("");
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
@@ -260,7 +261,6 @@ export function ManualCreatePanel({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   // Sibling stages under the chosen parent, so the Stage picker can offer the
   // already-used max stage (and one beyond) instead of flooring at Stage 1–3.
   const { data: parentChildren = [] } = useQuery({
@@ -285,12 +285,6 @@ export function ManualCreatePanel({
     if (kept.length !== attachments.length) setDraft({ attachments: kept });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (!issueDraftId && issueDraftSessionId) {
-      setIssueDraftId(issueDraftSessionId);
-    }
-  }, [issueDraftId, issueDraftSessionId]);
 
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
@@ -319,44 +313,6 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
-  const createIssueDraftMutation = useCreateIssueDraft();
-  const appendIssueDraftMessage = useAppendIssueDraftMessage(issueDraftId ?? "");
-  const delegateIssueDraft = useDelegateIssueDraft(issueDraftId ?? "");
-  const generateIssueDraft = useGenerateIssueDraft(issueDraftId ?? "");
-  const confirmIssueDraft = useConfirmIssueDraft(issueDraftId ?? "");
-  const { data: activeIssueDraftBundle } = useQuery({
-    ...activeIssueDraftQueryOptions(wsId),
-    enabled: !!wsId && !issueDraftId,
-  });
-  const { data: issueDraftBundle } = useQuery({
-    ...issueDraftQueryOptions(wsId, issueDraftId ?? ""),
-    enabled: !!issueDraftId,
-    refetchInterval: (query) =>
-      query.state.data?.member_tasks.some((task) => task.status === "queued" || task.status === "running")
-        ? 2000
-        : false,
-  });
-  useEffect(() => {
-    const activeID = activeIssueDraftBundle?.session.id;
-    if (!issueDraftId && activeID) {
-      setIssueDraftId(activeID);
-      setIssueDraftSessionId(activeID);
-    }
-  }, [activeIssueDraftBundle?.session.id, issueDraftId, setIssueDraftSessionId]);
-  const selectedSquad = squads.find((s) => s.id === assigneeId);
-  const selectedSquadId =
-    assigneeType === "squad" && assigneeId ? assigneeId : selectedSquad?.id;
-  const activeIssueDraftTask = issueDraftBundle?.member_tasks.find((task) =>
-    task.status === "queued" || task.status === "running",
-  );
-  const canStartIssueDraft = Boolean(
-    projectId && selectedSquadId,
-  );
-  const issueDraftStartHint = !projectId
-    ? t(($) => $.create_issue.issue_draft.hint_project)
-    : !selectedSquadId
-      ? t(($) => $.create_issue.issue_draft.hint_squad)
-      : t(($) => $.create_issue.issue_draft.hint_ready);
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -532,35 +488,6 @@ export function ManualCreatePanel({
     }
   };
 
-  const startIssueDraft = async () => {
-    if (!canStartIssueDraft || !projectId || !selectedSquadId) return;
-    const description = descEditorRef.current?.getMarkdown()?.trim() ?? "";
-    const initialMessage = [title.trim(), description].filter(Boolean).join("\n\n") || "用户开启了小队 issue 澄清会话。";
-    const bundle = await createIssueDraftMutation.mutateAsync({
-      project_id: projectId,
-      squad_id: selectedSquadId,
-      initial_message: initialMessage,
-    });
-    setIssueDraftId(bundle.session.id);
-    setIssueDraftSessionId(bundle.session.id);
-    toast.success(t(($) => $.create_issue.issue_draft.toast_started));
-  };
-
-  const appendIssueDraftReply = async () => {
-    if (!issueDraftId || !issueDraftReply.trim()) return;
-    await appendIssueDraftMessage.mutateAsync({ content: issueDraftReply.trim() });
-    setIssueDraftReply("");
-  };
-
-  const confirmIssueDraftSession = async () => {
-    if (!issueDraftId) return;
-    const bundle = await confirmIssueDraft.mutateAsync();
-    if (bundle.session.status === "created") {
-      setIssueDraftId(null);
-      setIssueDraftSessionId(undefined);
-    }
-  };
-
   // Switch to agent mode. Hand the typed text up to the shell as the carry
   // payload; the shell stores it as the next panel's `data` so the agent
   // panel reads `data.prompt` on mount. Concatenate title + description so
@@ -603,6 +530,17 @@ export function ManualCreatePanel({
       ...(projectId ? { project_id: projectId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
+    });
+  };
+
+  const switchToSquadDraft = () => {
+    const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
+    const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
+    setLastMode("squad_draft");
+    onSwitchSquadDraft?.({
+      prompt,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(assigneeId && assigneeType === "squad" ? { squad_id: assigneeId } : {}),
     });
   };
 
@@ -679,128 +617,6 @@ export function ManualCreatePanel({
               />
               {descDragOver && <FileDropOverlay />}
             </div>
-
-            {(projectId || selectedSquadId || issueDraftId || issueDraftBundle) && (
-              <div className="mx-5 mb-2 shrink-0 rounded-md border bg-muted/20 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium">
-                      {t(($) => $.create_issue.issue_draft.title)}
-                      {selectedSquad ? ` · ${selectedSquad.name}` : ""}
-                    </div>
-                    <div className="truncate text-[0.6875rem] text-muted-foreground">
-                      {activeIssueDraftTask
-                        ? t(($) => $.create_issue.issue_draft.current_owner, {
-                            name: getActorName("agent", activeIssueDraftTask.agent_id),
-                            status: activeIssueDraftTask.status,
-                          })
-                        : issueDraftStartHint}
-                    </div>
-                  </div>
-                  {!issueDraftBundle ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={startIssueDraft}
-                      disabled={!canStartIssueDraft || createIssueDraftMutation.isPending}
-                    >
-                      {t(($) => $.create_issue.issue_draft.start)}
-                    </Button>
-                  ) : (
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => delegateIssueDraft.mutateAsync()}
-                        disabled={!issueDraftId || delegateIssueDraft.isPending || !!activeIssueDraftTask}
-                      >
-                        {activeIssueDraftTask || delegateIssueDraft.isPending
-                          ? t(($) => $.create_issue.issue_draft.delegating)
-                          : t(($) => $.create_issue.issue_draft.delegate)}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => generateIssueDraft.mutateAsync()}
-                        disabled={!issueDraftId || generateIssueDraft.isPending}
-                      >
-                        {t(($) => $.create_issue.issue_draft.generate)}
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={confirmIssueDraftSession}
-                        disabled={!issueDraftId || confirmIssueDraft.isPending}
-                      >
-                        {t(($) => $.create_issue.issue_draft.confirm)}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                {issueDraftBundle && (
-                  <div className="mt-3 grid gap-2">
-                    {issueDraftBundle.member_tasks.length > 0 && (
-                      <div className="grid gap-1 rounded border bg-background/70 px-2 py-1.5 text-xs">
-                        {issueDraftBundle.member_tasks.map((task) => (
-                          <div key={task.id} className="flex items-center justify-between gap-2">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <ActorAvatar
-                                actorType="agent"
-                                actorId={task.agent_id}
-                                size={16}
-                                profileLink={false}
-                              />
-                              <span className="truncate">
-                                {getActorName("agent", task.agent_id)}
-                              </span>
-                            </div>
-                            <span className="shrink-0 text-muted-foreground">{task.status}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="max-h-24 overflow-y-auto rounded border bg-background/70 px-2 py-1.5 text-xs">
-                      {issueDraftBundle.messages.length === 0 ? (
-                        <p className="text-muted-foreground">{t(($) => $.create_issue.issue_draft.no_messages)}</p>
-                      ) : (
-                        issueDraftBundle.messages.slice(-4).map((msg) => (
-                          <div key={msg.id} className="py-1">
-                            <span className="font-medium">{msg.author_type}</span>
-                            <span className="text-muted-foreground"> · {msg.message_type}</span>
-                            <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{msg.content}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    {issueDraftBundle.artifacts.length > 0 && (
-                      <div className="grid gap-1 text-[0.6875rem] text-muted-foreground">
-                        {issueDraftBundle.artifacts.slice(0, 3).map((artifact) => (
-                          <div key={artifact.id} className="flex items-center justify-between gap-2">
-                            <span>{artifact.artifact_type} v{artifact.revision}</span>
-                            <span className="truncate">{artifact.content.split("\n")[0]}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <Textarea
-                        value={issueDraftReply}
-                        onChange={(e) => setIssueDraftReply(e.target.value)}
-                        placeholder={t(($) => $.create_issue.issue_draft.reply_placeholder)}
-                        className="min-h-9 text-xs"
-                      />
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={appendIssueDraftReply}
-                        disabled={!issueDraftReply.trim() || appendIssueDraftMessage.isPending}
-                      >
-                        {t(($) => $.create_issue.issue_draft.send)}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
@@ -1025,6 +841,15 @@ export function ManualCreatePanel({
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
                 </button>
+                <button
+                  type="button"
+                  onClick={switchToSquadDraft}
+                  title={t(($) => $.create_issue.issue_draft.switch_tooltip)}
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Users className="size-3.5 text-brand/80" />
+                  {t(($) => $.create_issue.issue_draft.switch)}
+                </button>
                 <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
                   <Switch
                     size="sm"
@@ -1047,6 +872,439 @@ export function ManualCreatePanel({
                 )}
               </div>
             </div>
+    </>
+  );
+}
+
+function formatDraftTime(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function draftStatusTone(status: string) {
+  if (status === "failed") return "text-destructive";
+  if (status === "ready_for_review" || status === "creating") return "text-emerald-600";
+  if (status === "delegating" || status === "drafting") return "text-brand";
+  return "text-muted-foreground";
+}
+
+function firstLine(value: string) {
+  return value.split("\n").find((line) => line.trim())?.trim() ?? "";
+}
+
+export function SquadIssueDraftPanel({
+  onClose,
+  onSwitchManual,
+  onSwitchAgent,
+  data,
+}: {
+  onClose: () => void;
+  onSwitchManual?: (carry?: Record<string, unknown> | null) => void;
+  onSwitchAgent?: (carry?: Record<string, unknown> | null) => void;
+  data?: Record<string, unknown> | null;
+}) {
+  const { t } = useT("modals");
+  const workspaceName = useCurrentWorkspace()?.name;
+  const wsId = useWorkspaceId();
+  const { getActorName } = useActorName();
+  const issueDraftSessionId = useIssueDraftStore((s) => s.issueDraftSessionId);
+  const setIssueDraftSessionId = useIssueDraftStore((s) => s.setIssueDraftSessionId);
+  const setLastMode = useCreateModeStore((s) => s.setLastMode);
+
+  const [projectId, setProjectId] = useState<string | undefined>(
+    (data?.project_id as string | undefined) ?? undefined,
+  );
+  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(
+    data?.squad_id ? "squad" : undefined,
+  );
+  const [squadId, setSquadId] = useState<string | undefined>(
+    (data?.squad_id as string | undefined) ?? undefined,
+  );
+  const [initialMessage, setInitialMessage] = useState(
+    (data?.prompt as string | undefined) ?? "",
+  );
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(
+    issueDraftSessionId ?? null,
+  );
+  const [reply, setReply] = useState("");
+
+  const { data: draftList } = useQuery(issueDraftListQueryOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const selectedSquadId = assigneeType === "squad" ? squadId : undefined;
+  const selectedSquad = squads.find((s) => s.id === selectedSquadId);
+  const sessions = draftList?.sessions ?? [];
+
+  useEffect(() => {
+    if (selectedDraftId) return;
+    const stored = issueDraftSessionId
+      ? sessions.find((session) => session.id === issueDraftSessionId)
+      : undefined;
+    const next = stored ?? sessions[0];
+    if (next) {
+      setSelectedDraftId(next.id);
+      setIssueDraftSessionId(next.id);
+    }
+  }, [issueDraftSessionId, selectedDraftId, sessions, setIssueDraftSessionId]);
+
+  const { data: draftBundle } = useQuery({
+    ...issueDraftQueryOptions(wsId, selectedDraftId ?? ""),
+    enabled: Boolean(wsId && selectedDraftId),
+    refetchInterval: (query) =>
+      query.state.data?.member_tasks.some((task) =>
+        task.status === "queued" || task.status === "running",
+      )
+        ? 2000
+        : false,
+  });
+
+  const createIssueDraftMutation = useCreateIssueDraft();
+  const appendIssueDraftMessage = useAppendIssueDraftMessage(selectedDraftId ?? "");
+  const delegateIssueDraft = useDelegateIssueDraft(selectedDraftId ?? "");
+  const generateIssueDraft = useGenerateIssueDraft(selectedDraftId ?? "");
+  const confirmIssueDraft = useConfirmIssueDraft(selectedDraftId ?? "");
+
+  const activeTask = draftBundle?.member_tasks.find((task) =>
+    task.status === "queued" || task.status === "running",
+  );
+  const canStart = Boolean(projectId && selectedSquadId);
+  const startHint = !projectId
+    ? t(($) => $.create_issue.issue_draft.hint_project)
+    : !selectedSquadId
+      ? t(($) => $.create_issue.issue_draft.hint_squad)
+      : t(($) => $.create_issue.issue_draft.hint_ready);
+
+  const switchToManual = () => {
+    setLastMode("manual");
+    onSwitchManual?.({
+      title: "",
+      description: initialMessage,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(selectedSquadId ? { assignee_type: "squad", assignee_id: selectedSquadId } : {}),
+    });
+  };
+
+  const switchToAgent = () => {
+    setLastMode("agent");
+    onSwitchAgent?.({
+      prompt: initialMessage,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(selectedSquadId ? { squad_id: selectedSquadId } : {}),
+    });
+  };
+
+  const selectDraft = (session: IssueDraftSession) => {
+    setSelectedDraftId(session.id);
+    setIssueDraftSessionId(session.id);
+  };
+
+  const startIssueDraft = async () => {
+    if (!canStart || !projectId || !selectedSquadId) return;
+    const bundle = await createIssueDraftMutation.mutateAsync({
+      project_id: projectId,
+      squad_id: selectedSquadId,
+      initial_message:
+        initialMessage.trim() || t(($) => $.create_issue.issue_draft.default_initial_message),
+    });
+    setSelectedDraftId(bundle.session.id);
+    setIssueDraftSessionId(bundle.session.id);
+    toast.success(t(($) => $.create_issue.issue_draft.toast_started));
+  };
+
+  const appendReply = async () => {
+    if (!selectedDraftId || !reply.trim()) return;
+    await appendIssueDraftMessage.mutateAsync({ content: reply.trim() });
+    setReply("");
+  };
+
+  const confirmDraft = async () => {
+    if (!selectedDraftId) return;
+    const bundle = await confirmIssueDraft.mutateAsync();
+    if (bundle.session.status === "created") {
+      setSelectedDraftId(null);
+      setIssueDraftSessionId(undefined);
+    }
+  };
+
+  const renderDraftListItem = (session: IssueDraftSession) => {
+    const isSelected = session.id === selectedDraftId;
+    const squadName = getActorName("squad", session.squad_id);
+    return (
+      <button
+        key={session.id}
+        type="button"
+        onClick={() => selectDraft(session)}
+        className={cn(
+          "w-full rounded-md border px-3 py-2 text-left transition-colors",
+          isSelected ? "border-brand/50 bg-brand/10" : "bg-background hover:bg-accent/60",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="truncate font-medium">{squadName}</span>
+          <span className={cn("shrink-0", draftStatusTone(session.status))}>
+            {session.status}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+          <Clock3 className="size-3" />
+          <span>{formatDraftTime(session.updated_at || session.created_at)}</span>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <DialogTitle className="sr-only">{t(($) => $.create_issue.issue_draft.sr_title)}</DialogTitle>
+
+      <div className="flex items-center justify-between border-b px-5 py-3 shrink-0">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs">
+          <span className="truncate text-muted-foreground">{workspaceName}</span>
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" />
+          <span className="shrink-0 font-medium">{t(($) => $.create_issue.issue_draft.breadcrumb)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={switchToManual}>
+            {t(($) => $.create_issue.switch_to_manual)}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={switchToAgent}>
+            {t(($) => $.create_issue.switch_to_agent)}
+          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                >
+                  <XIcon className="size-4" />
+                </button>
+              }
+            />
+            <TooltipContent side="bottom">{t(($) => $.common.close)}</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className="min-h-0 border-b bg-muted/20 p-3 md:border-b-0 md:border-r">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs font-medium">{t(($) => $.create_issue.issue_draft.drafts)}</div>
+            <span className="text-[0.6875rem] text-muted-foreground">{sessions.length}</span>
+          </div>
+          <div className="grid max-h-40 gap-2 overflow-y-auto pr-1 md:max-h-full">
+            {sessions.length === 0 ? (
+              <div className="rounded-md border border-dashed bg-background/60 px-3 py-8 text-center text-xs text-muted-foreground">
+                {t(($) => $.create_issue.issue_draft.no_drafts)}
+              </div>
+            ) : (
+              sessions.map(renderDraftListItem)
+            )}
+          </div>
+        </aside>
+
+        <section className="flex min-h-0 flex-col">
+          <div className="grid gap-3 border-b p-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <ProjectPicker
+                projectId={projectId ?? null}
+                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+              <AssigneePicker
+                assigneeType={assigneeType ?? null}
+                assigneeId={squadId ?? null}
+                onUpdate={(u) => {
+                  const nextType = u.assignee_type ?? undefined;
+                  setAssigneeType(nextType);
+                  setSquadId(nextType === "squad" ? (u.assignee_id ?? undefined) : undefined);
+                }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+              <Button
+                size="sm"
+                onClick={startIssueDraft}
+                disabled={!canStart || createIssueDraftMutation.isPending}
+              >
+                {createIssueDraftMutation.isPending
+                  ? t(($) => $.create_issue.issue_draft.starting)
+                  : t(($) => $.create_issue.issue_draft.start)}
+              </Button>
+            </div>
+            <Textarea
+              value={initialMessage}
+              onChange={(e) => setInitialMessage(e.target.value)}
+              placeholder={t(($) => $.create_issue.issue_draft.initial_placeholder)}
+              className="min-h-20 resize-none text-sm"
+            />
+            <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
+              <Users className="size-3" />
+              <span className="truncate">
+                {selectedSquad ? `${selectedSquad.name} · ${startHint}` : startHint}
+              </span>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {!selectedDraftId ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                {t(($) => $.create_issue.issue_draft.select_or_start)}
+              </div>
+            ) : !draftBundle ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                {t(($) => $.create_issue.issue_draft.loading)}
+              </div>
+            ) : (
+              <div className="mx-auto grid max-w-3xl gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">
+                      {getActorName("squad", draftBundle.session.squad_id)}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {activeTask
+                        ? t(($) => $.create_issue.issue_draft.current_owner, {
+                            name: getActorName("agent", activeTask.agent_id),
+                            status: activeTask.status,
+                          })
+                        : t(($) => $.create_issue.issue_draft.status_line, {
+                            status: draftBundle.session.status,
+                          })}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => delegateIssueDraft.mutateAsync()}
+                      disabled={!selectedDraftId || delegateIssueDraft.isPending || !!activeTask}
+                    >
+                      {activeTask || delegateIssueDraft.isPending
+                        ? t(($) => $.create_issue.issue_draft.delegating)
+                        : t(($) => $.create_issue.issue_draft.delegate)}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => generateIssueDraft.mutateAsync()}
+                      disabled={!selectedDraftId || generateIssueDraft.isPending}
+                    >
+                      <Sparkles className="size-3.5" />
+                      {t(($) => $.create_issue.issue_draft.generate)}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={confirmDraft}
+                      disabled={!selectedDraftId || confirmIssueDraft.isPending}
+                    >
+                      {t(($) => $.create_issue.issue_draft.confirm)}
+                    </Button>
+                  </div>
+                </div>
+
+                {draftBundle.member_tasks.length > 0 && (
+                  <div className="grid gap-1 rounded-md border px-3 py-2 text-xs">
+                    {draftBundle.member_tasks.map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <ActorAvatar
+                            actorType="agent"
+                            actorId={task.agent_id}
+                            size={18}
+                            profileLink={false}
+                          />
+                          <span className="truncate">{getActorName("agent", task.agent_id)}</span>
+                        </div>
+                        <span className={cn("shrink-0", draftStatusTone(task.status))}>
+                          {task.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid gap-2">
+                  {draftBundle.messages.length === 0 ? (
+                    <div className="rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground">
+                      {t(($) => $.create_issue.issue_draft.no_messages)}
+                    </div>
+                  ) : (
+                    draftBundle.messages.map((msg) => (
+                      <div key={msg.id} className="rounded-md border bg-background px-3 py-2 text-sm">
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                          <span className="font-medium">
+                            {msg.author_type === "agent" && msg.author_id
+                              ? getActorName("agent", msg.author_id)
+                              : msg.author_type}
+                          </span>
+                          <span className="text-muted-foreground">{msg.message_type}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap text-muted-foreground">{msg.content}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {draftBundle.artifacts.length > 0 && (
+                  <div className="grid gap-2 rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-xs font-medium">
+                      <MessageSquareText className="size-3.5" />
+                      {t(($) => $.create_issue.issue_draft.artifacts)}
+                    </div>
+                    {draftBundle.artifacts.slice(0, 4).map((artifact) => (
+                      <div key={artifact.id} className="grid gap-0.5 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{artifact.artifact_type} v{artifact.revision}</span>
+                          <span className="text-muted-foreground">{formatDraftTime(artifact.created_at)}</span>
+                        </div>
+                        <p className="truncate text-muted-foreground">{firstLine(artifact.content)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {draftBundle.confirm_steps.length > 0 && (
+                  <div className="grid gap-1 rounded-md border px-3 py-2 text-xs">
+                    {draftBundle.confirm_steps.map((step) => (
+                      <div key={step.step} className="flex items-center justify-between gap-2">
+                        <span className="truncate">{step.step}</span>
+                        <span className={draftStatusTone(step.status)}>{step.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 gap-2 border-t p-4">
+            <Textarea
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              placeholder={t(($) => $.create_issue.issue_draft.reply_placeholder)}
+              className="min-h-10 flex-1 resize-none text-sm"
+              disabled={!selectedDraftId}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={appendReply}
+              disabled={!selectedDraftId || !reply.trim() || appendIssueDraftMessage.isPending}
+            >
+              {t(($) => $.create_issue.issue_draft.send)}
+            </Button>
+          </div>
+        </section>
+      </div>
     </>
   );
 }

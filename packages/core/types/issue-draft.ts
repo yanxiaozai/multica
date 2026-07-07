@@ -86,6 +86,10 @@ export interface IssueDraftBundle {
   confirm_steps: IssueDraftConfirmStep[];
 }
 
+export interface ListIssueDraftSessionsResponse {
+  sessions: IssueDraftSession[];
+}
+
 export interface CreateIssueDraftRequest {
   project_id: string;
   squad_id: string;

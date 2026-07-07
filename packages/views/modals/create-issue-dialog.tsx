@@ -8,7 +8,11 @@ import {
   type CreateMode,
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
-import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+import {
+  ManualCreatePanel,
+  SquadIssueDraftPanel,
+  manualDialogContentClass,
+} from "./create-issue";
 
 /**
  * Shell that owns the single `<Dialog>` AND `<DialogContent>` for the
@@ -67,6 +71,13 @@ export function CreateIssueDialog({
             ? "!max-w-4xl !w-full !h-5/6"
             : "!max-w-xl !w-full !max-h-[80vh]",
         )
+      : mode === "squad_draft"
+        ? cn(
+            "p-0 gap-0 flex flex-col overflow-hidden",
+            "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
+            "!transition-all !duration-300 !ease-out",
+            "!max-w-5xl !w-full !h-[82vh]",
+          )
       : manualDialogContentClass(isExpanded);
 
   return (
@@ -84,10 +95,18 @@ export function CreateIssueDialog({
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
           />
+        ) : mode === "squad_draft" ? (
+          <SquadIssueDraftPanel
+            onClose={onClose}
+            onSwitchManual={switchTo("manual")}
+            onSwitchAgent={switchTo("agent")}
+            data={panelData}
+          />
         ) : (
           <ManualCreatePanel
             onClose={onClose}
             onSwitchMode={switchTo("agent")}
+            onSwitchSquadDraft={switchTo("squad_draft")}
             data={panelData}
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
