@@ -353,10 +353,10 @@ export function ManualCreatePanel({
     projectId && selectedSquadId,
   );
   const issueDraftStartHint = !projectId
-    ? "先选择项目，详细 .spec 会写入这个项目的主仓库。"
+    ? t(($) => $.create_issue.issue_draft.hint_project)
     : !selectedSquadId
-      ? "先把 assignee 选择为小队。"
-      : "可以开启小队澄清；底部按钮仍可直接创建普通 issue。";
+      ? t(($) => $.create_issue.issue_draft.hint_squad)
+      : t(($) => $.create_issue.issue_draft.hint_ready);
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -543,7 +543,7 @@ export function ManualCreatePanel({
     });
     setIssueDraftId(bundle.session.id);
     setIssueDraftSessionId(bundle.session.id);
-    toast.success("Issue draft session started");
+    toast.success(t(($) => $.create_issue.issue_draft.toast_started));
   };
 
   const appendIssueDraftReply = async () => {
@@ -685,12 +685,15 @@ export function ManualCreatePanel({
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-medium">
-                      Squad issue draft
+                      {t(($) => $.create_issue.issue_draft.title)}
                       {selectedSquad ? ` · ${selectedSquad.name}` : ""}
                     </div>
                     <div className="truncate text-[0.6875rem] text-muted-foreground">
                       {activeIssueDraftTask
-                        ? `当前澄清负责人：${getActorName("agent", activeIssueDraftTask.agent_id)} · ${activeIssueDraftTask.status}`
+                        ? t(($) => $.create_issue.issue_draft.current_owner, {
+                            name: getActorName("agent", activeIssueDraftTask.agent_id),
+                            status: activeIssueDraftTask.status,
+                          })
                         : issueDraftStartHint}
                     </div>
                   </div>
@@ -701,7 +704,7 @@ export function ManualCreatePanel({
                       onClick={startIssueDraft}
                       disabled={!canStartIssueDraft || createIssueDraftMutation.isPending}
                     >
-                      Start
+                      {t(($) => $.create_issue.issue_draft.start)}
                     </Button>
                   ) : (
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -711,7 +714,9 @@ export function ManualCreatePanel({
                         onClick={() => delegateIssueDraft.mutateAsync()}
                         disabled={!issueDraftId || delegateIssueDraft.isPending || !!activeIssueDraftTask}
                       >
-                        {activeIssueDraftTask || delegateIssueDraft.isPending ? "Delegating" : "Delegate"}
+                        {activeIssueDraftTask || delegateIssueDraft.isPending
+                          ? t(($) => $.create_issue.issue_draft.delegating)
+                          : t(($) => $.create_issue.issue_draft.delegate)}
                       </Button>
                       <Button
                         size="sm"
@@ -719,14 +724,14 @@ export function ManualCreatePanel({
                         onClick={() => generateIssueDraft.mutateAsync()}
                         disabled={!issueDraftId || generateIssueDraft.isPending}
                       >
-                        Generate
+                        {t(($) => $.create_issue.issue_draft.generate)}
                       </Button>
                       <Button
                         size="sm"
                         onClick={confirmIssueDraftSession}
                         disabled={!issueDraftId || confirmIssueDraft.isPending}
                       >
-                        Confirm
+                        {t(($) => $.create_issue.issue_draft.confirm)}
                       </Button>
                     </div>
                   )}
@@ -755,7 +760,7 @@ export function ManualCreatePanel({
                     )}
                     <div className="max-h-24 overflow-y-auto rounded border bg-background/70 px-2 py-1.5 text-xs">
                       {issueDraftBundle.messages.length === 0 ? (
-                        <p className="text-muted-foreground">No messages yet.</p>
+                        <p className="text-muted-foreground">{t(($) => $.create_issue.issue_draft.no_messages)}</p>
                       ) : (
                         issueDraftBundle.messages.slice(-4).map((msg) => (
                           <div key={msg.id} className="py-1">
@@ -780,7 +785,7 @@ export function ManualCreatePanel({
                       <Textarea
                         value={issueDraftReply}
                         onChange={(e) => setIssueDraftReply(e.target.value)}
-                        placeholder="Reply to the squad..."
+                        placeholder={t(($) => $.create_issue.issue_draft.reply_placeholder)}
                         className="min-h-9 text-xs"
                       />
                       <Button
@@ -789,7 +794,7 @@ export function ManualCreatePanel({
                         onClick={appendIssueDraftReply}
                         disabled={!issueDraftReply.trim() || appendIssueDraftMessage.isPending}
                       >
-                        Send
+                        {t(($) => $.create_issue.issue_draft.send)}
                       </Button>
                     </div>
                   </div>
