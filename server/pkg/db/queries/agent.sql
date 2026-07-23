@@ -598,6 +598,15 @@ FOR UPDATE;
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
+-- name: HasOtherActiveTaskForIssue :one
+-- Returns true if there is any active issue task other than the current task.
+-- Squad leaders record their routing outcome before their own task completes,
+-- so "ready for review" checks must ignore that still-running leader task.
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1
+  AND id <> $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
 -- Used by the coalescing queue: allow enqueue when a task is running (so

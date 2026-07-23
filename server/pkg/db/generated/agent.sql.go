@@ -2111,6 +2111,28 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 	return has_active, err
 }
 
+const hasOtherActiveTaskForIssue = `-- name: HasOtherActiveTaskForIssue :one
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1
+  AND id <> $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+`
+
+type HasOtherActiveTaskForIssueParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+// Returns true if there is any active issue task other than the current task.
+// Squad leaders record their routing outcome before their own task completes,
+// so "ready for review" checks must ignore that still-running leader task.
+func (q *Queries) HasOtherActiveTaskForIssue(ctx context.Context, arg HasOtherActiveTaskForIssueParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOtherActiveTaskForIssue, arg.IssueID, arg.ID)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched')

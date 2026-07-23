@@ -51,6 +51,9 @@ multica squad member set-role <squad-id>
 ```
 
 Use `--help` for exact flags before writes.
+When a squad leader records `no_action` or `failed` on an `in_progress` issue
+and no other task remains active, the handler promotes the issue to `in_review`
+(handler/squad.go RecordSquadLeaderEvaluation).
 
 ## Create / Update
 
@@ -98,6 +101,10 @@ Contracts:
   `agentSkillsRosterSegment` — "skills: a, b" or
   "no skills assigned"; builtin multica-* skills are excluded and human
   members carry no skills segment (squad_briefing.go renderMemberRow);
+- operating protocol requires the leader to identify independent work packages
+  before delegation, delegate parallel lanes in the same turn when possible,
+  and keep dependent review/design/test/final-acceptance gates sequential
+  (squad_briefing.go:30-47);
 - no traced behavior injects `instructions` into every squad member.
 
 ## Issue Assignment

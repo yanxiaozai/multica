@@ -345,7 +345,23 @@ func (s *Service) Confirm(ctx context.Context, in ConfirmInput) (SessionBundle, 
 	if _, err := s.requireLatestArtifact(ctx, in.WorkspaceID, in.SessionID, ArtifactRemoteIssue); err != nil {
 		return SessionBundle{}, err
 	}
+	existingSteps, err := s.Queries.ListIssueDraftConfirmSteps(ctx, db.ListIssueDraftConfirmStepsParams{
+		SessionID:   in.SessionID,
+		WorkspaceID: in.WorkspaceID,
+	})
+	if err != nil {
+		return SessionBundle{}, fmt.Errorf("list confirm steps: %w", err)
+	}
+	succeeded := make(map[string]struct{}, len(existingSteps))
+	for _, step := range existingSteps {
+		if step.Status == "succeeded" {
+			succeeded[step.Step] = struct{}{}
+		}
+	}
 	for _, step := range []string{"write_spec", "create_multica_issue", "create_remote_issue", "commit_and_push", "link_outputs"} {
+		if _, ok := succeeded[step]; ok {
+			continue
+		}
 		if _, err := s.Queries.UpsertIssueDraftConfirmStep(ctx, db.UpsertIssueDraftConfirmStepParams{
 			SessionID:      in.SessionID,
 			WorkspaceID:    in.WorkspaceID,

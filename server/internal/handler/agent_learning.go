@@ -445,7 +445,7 @@ func (h *Handler) GenerateIssueLearningReport(w http.ResponseWriter, r *http.Req
 		IssueID:     issue.ID,
 		TaskID:      taskID,
 		AgentID:     agentID,
-		Summary:     issueLearningSummary(issue, tasks),
+		Summary:     issueLearningSummary(issue, tasks, agentRow),
 		Metadata: jsonMetadataBytes(map[string]any{
 			"source":           "manual_issue_learning",
 			"issue_status":     issue.Status,
@@ -459,13 +459,14 @@ func (h *Handler) GenerateIssueLearningReport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	learningCopy := issueLearningSuggestionCopy(issue, agentRow)
 	suggestion, ok := h.createAgentEvolutionSuggestionFromRequest(w, r, qtx, issue.WorkspaceID, report.ID, CreateAgentEvolutionSuggestionRequest{
 		Scope:           agentLearningScopePersonalAgent,
 		Risk:            agentLearningRiskSafe,
 		TargetID:        uuidToString(agentID),
-		Title:           "Capture learning before handoff",
-		Rationale:       "This issue's implementation can be complete even when the issue close flow does not run. The agent should preserve lessons before final handoff.",
-		ProposedContent: "When issue work is complete but the issue has not gone through a close or done workflow, generate a Learning Report before the final handoff so useful workflow lessons and evolution suggestions are preserved.",
+		Title:           learningCopy.title,
+		Rationale:       learningCopy.rationale,
+		ProposedContent: learningCopy.proposedContent,
 		Metadata: map[string]any{
 			"source":   "manual_issue_learning",
 			"issue_id": uuidToString(issue.ID),
@@ -506,13 +507,63 @@ func issueLearningAgentAndTask(issue db.Issue, tasks []db.AgentTaskQueue) (pgtyp
 	return pgtype.UUID{}, pgtype.UUID{}, false
 }
 
-func issueLearningSummary(issue db.Issue, tasks []db.AgentTaskQueue) string {
+func issueLearningSummary(issue db.Issue, tasks []db.AgentTaskQueue, agent db.Agent) string {
 	identifier := issueIdentifierForLearning(issue)
+	if learningPrefersChinese(issue, agent) {
+		if len(tasks) == 0 {
+			return fmt.Sprintf("%s 的手动 Learning Report。当前 issue 状态为 %s，且没有记录到 agent task；需要显式保留这次流程经验。", identifier, issue.Status)
+		}
+		latest := tasks[0]
+		return fmt.Sprintf("%s 的手动 Learning Report。当前 issue 状态为 %s；最近一次 agent task 状态为 %s。", identifier, issue.Status, latest.Status)
+	}
 	if len(tasks) == 0 {
 		return fmt.Sprintf("Manual learning report for %s. The issue is currently %s and has no recorded agent task; preserve the workflow lesson explicitly.", identifier, issue.Status)
 	}
 	latest := tasks[0]
 	return fmt.Sprintf("Manual learning report for %s. The issue is currently %s; the latest agent task is %s.", identifier, issue.Status, latest.Status)
+}
+
+type issueLearningSuggestionText struct {
+	title           string
+	rationale       string
+	proposedContent string
+}
+
+func issueLearningSuggestionCopy(issue db.Issue, agent db.Agent) issueLearningSuggestionText {
+	if learningPrefersChinese(issue, agent) {
+		return issueLearningSuggestionText{
+			title:           "交接前保留学习经验",
+			rationale:       "即使 issue 尚未走到关闭或完成流程，实现工作也可能已经完成。agent 应在最终交接前保留本次经验，避免可复用的流程教训丢失。",
+			proposedContent: "当 issue 工作已经完成但尚未经过关闭或完成流程时，在最终交接前生成 Learning Report，保留有价值的流程经验和进化建议。补全内容应跟随目标 agent 或 skill 的现有语言风格；中文 agent/skill 使用中文，英文 agent/skill 使用英文。",
+		}
+	}
+	return issueLearningSuggestionText{
+		title:           "Capture learning before handoff",
+		rationale:       "This issue's implementation can be complete even when the issue close flow does not run. The agent should preserve lessons before final handoff.",
+		proposedContent: "When issue work is complete but the issue has not gone through a close or done workflow, generate a Learning Report before the final handoff so useful workflow lessons and evolution suggestions are preserved. Match the applied content language to the target agent or skill's existing language style.",
+	}
+}
+
+func learningPrefersChinese(issue db.Issue, agent db.Agent) bool {
+	return containsCJK(issue.Title) ||
+		containsCJK(issue.Description.String) ||
+		containsCJK(agent.Name) ||
+		containsCJK(agent.Description) ||
+		containsCJK(agent.Instructions)
+}
+
+func containsCJK(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= '\u4e00' && r <= '\u9fff':
+			return true
+		case r >= '\u3400' && r <= '\u4dbf':
+			return true
+		case r >= '\uf900' && r <= '\ufaff':
+			return true
+		}
+	}
+	return false
 }
 
 func issueIdentifierForLearning(issue db.Issue) string {

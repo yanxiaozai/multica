@@ -1856,6 +1856,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
 		}
 	}
+
+	if retried == nil && task.IssueID.Valid {
+		s.promoteBlockedIssueToReview(ctx, task, failureReason)
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -1885,6 +1890,66 @@ func resumeUnsafeFailureReason(reason string) bool {
 	default:
 		return false
 	}
+}
+
+// promoteBlockedIssueToReview moves a delivered-but-blocked issue to review.
+// Agent prompts intentionally forbid squad leaders from setting in_review
+// themselves, so the server owns this narrow status handoff when a task ends
+// with the explicit agent_blocked reason and no other active task remains.
+func (s *TaskService) promoteBlockedIssueToReview(ctx context.Context, task db.AgentTaskQueue, failureReason string) bool {
+	if !task.IssueID.Valid || failureReason != taskfailure.ReasonAgentBlocked.String() {
+		return false
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("promote blocked issue: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return false
+	}
+	return s.promoteBlockedIssueToReviewForIssue(ctx, task, issue, failureReason)
+}
+
+func (s *TaskService) promoteBlockedIssueToReviewForIssue(ctx context.Context, task db.AgentTaskQueue, issue db.Issue, failureReason string) bool {
+	if !task.IssueID.Valid || failureReason != taskfailure.ReasonAgentBlocked.String() || issue.Status != "in_progress" {
+		return false
+	}
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("promote blocked issue: active check failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return false
+	}
+	if hasActive {
+		return false
+	}
+	updatedIssue, err := s.Queries.UpdateIssueStatusIfCurrent(ctx, db.UpdateIssueStatusIfCurrentParams{
+		ID:            task.IssueID,
+		WorkspaceID:   issue.WorkspaceID,
+		CurrentStatus: "in_progress",
+		NextStatus:    "in_review",
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("promote blocked issue: status update failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"error", err,
+			)
+		}
+		return false
+	}
+	slog.Info("promoted blocked issue to review",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(task.IssueID),
+	)
+	s.broadcastIssueUpdated(updatedIssue, issue.Status)
+	return true
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -2120,6 +2185,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				issueKey := util.UUIDToString(t.IssueID)
 				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
+					if failureReason == taskfailure.ReasonAgentBlocked.String() {
+						s.promoteBlockedIssueToReviewForIssue(ctx, t, issue, failureReason)
+						continue
+					}
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
 						slog.Warn("handle failed tasks: active check failed",

@@ -30,8 +30,18 @@ defeats the entire purpose of the squad and is a protocol violation.
 Your responsibilities, in order:
 
 1. **Read the issue** (title, description, latest comments, acceptance
-   criteria) and decide which squad member is best suited to do the work.
-   Match the task to each member's listed **skills** and role in the Squad
+   criteria) and decide whether the next work is one task or several
+   independent work packages. Before picking assignees, identify any slices
+   that can proceed in parallel without depending on each other's output or
+   editing the same files/state.
+   - If the work is independent, delegate each parallel lane in this same
+     turn. Use one concise comment with separate @mentions, or create one
+     child issue per assignee when the lanes need separate tracking.
+   - If the work is sequential, delegate only the next unblocked step and
+     explain the dependency briefly.
+   - Do not parallelize review, design audit, testing, or final acceptance
+     until the implementation/evidence they depend on exists.
+   Match each task to each member's listed **skills** and role in the Squad
    Roster below — prefer the member whose skills cover the work.
 2. **Delegate by @mention.** Post a single comment on this issue that
    @mentions the chosen member(s) and tells them what to do.

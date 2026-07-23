@@ -14,6 +14,7 @@ import (
 type runningSquadLeaderTaskFixture struct {
 	IssueID          string
 	LeaderID         string
+	RuntimeID        string
 	TaskID           string
 	TriggerCommentID string
 }
@@ -59,6 +60,7 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 	return runningSquadLeaderTaskFixture{
 		IssueID:          issueID,
 		LeaderID:         fx.LeaderID,
+		RuntimeID:        runtimeID,
 		TaskID:           taskID,
 		TriggerCommentID: triggerCommentID,
 	}
@@ -158,6 +160,96 @@ func TestCompleteTask_SquadLeaderActionStillSynthesizesComment(t *testing.T) {
 
 	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.LeaderID); got != 1 {
 		t.Fatalf("expected action completion to synthesize one comment, got %d", got)
+	}
+}
+
+func TestRecordSquadLeaderEvaluationFailedPromotesIssueToReview(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newRunningSquadLeaderTaskFixture(t)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE issue SET status = 'in_progress' WHERE id = $1
+	`, fx.IssueID); err != nil {
+		t.Fatalf("set issue in_progress: %v", err)
+	}
+
+	recordSquadLeaderEvaluationForTask(t, fx, "failed")
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status FROM issue WHERE id = $1
+	`, fx.IssueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "in_review" {
+		t.Fatalf("issue status = %q, want in_review", status)
+	}
+}
+
+func TestRecordSquadLeaderEvaluationNoActionPromotesIssueToReview(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newRunningSquadLeaderTaskFixture(t)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE issue SET status = 'in_progress' WHERE id = $1
+	`, fx.IssueID); err != nil {
+		t.Fatalf("set issue in_progress: %v", err)
+	}
+
+	recordSquadLeaderEvaluationForTask(t, fx, "no_action")
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status FROM issue WHERE id = $1
+	`, fx.IssueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "in_review" {
+		t.Fatalf("issue status = %q, want in_review", status)
+	}
+}
+
+func TestRecordSquadLeaderEvaluationNoActionKeepsIssueInProgressWhenOtherTaskActive(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newRunningSquadLeaderTaskFixture(t)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE issue SET status = 'in_progress' WHERE id = $1
+	`, fx.IssueID); err != nil {
+		t.Fatalf("set issue in_progress: %v", err)
+	}
+
+	var otherTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at
+		)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, fx.LeaderID, fx.RuntimeID, fx.IssueID).Scan(&otherTaskID); err != nil {
+		t.Fatalf("create other active task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, otherTaskID)
+	})
+
+	recordSquadLeaderEvaluationForTask(t, fx, "no_action")
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status FROM issue WHERE id = $1
+	`, fx.IssueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "in_progress" {
+		t.Fatalf("issue status = %q, want in_progress", status)
 	}
 }
 

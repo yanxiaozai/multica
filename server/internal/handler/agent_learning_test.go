@@ -201,6 +201,48 @@ func TestGenerateIssueLearningReportUsesAgentAssigneeWithoutTask(t *testing.T) {
 	}
 }
 
+func TestGenerateIssueLearningReportUsesChineseForChineseIssue(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "中文复盘 Agent", []byte(`{}`))
+	issueID := createHandlerTestLearningIssue(t, agentID)
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE issue SET title = '员工模块视觉还原' WHERE id = $1
+	`, issueID); err != nil {
+		t.Fatalf("update issue title: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/learning-report?workspace_id="+testWorkspaceID, nil), "id", issueID)
+	testHandler.GenerateIssueLearningReport(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("GenerateIssueLearningReport: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var report AgentLearningReportResponse
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode generated learning report: %v", err)
+	}
+	if report.TaskID == nil || *report.TaskID != taskID {
+		t.Fatalf("report task = %v, want %q", report.TaskID, taskID)
+	}
+	if !strings.Contains(report.Summary, "手动 Learning Report") || !strings.Contains(report.Summary, "当前 issue 状态") {
+		t.Fatalf("expected Chinese report summary, got %q", report.Summary)
+	}
+	if len(report.Suggestions) != 1 {
+		t.Fatalf("expected one generated suggestion, got %d", len(report.Suggestions))
+	}
+	suggestion := report.Suggestions[0]
+	if suggestion.Title != "交接前保留学习经验" {
+		t.Fatalf("suggestion title = %q, want Chinese title", suggestion.Title)
+	}
+	if !strings.Contains(suggestion.Rationale, "最终交接前") {
+		t.Fatalf("expected Chinese rationale, got %q", suggestion.Rationale)
+	}
+	if !strings.Contains(suggestion.ProposedContent, "中文 agent/skill 使用中文") {
+		t.Fatalf("expected Chinese proposed content with language guidance, got %q", suggestion.ProposedContent)
+	}
+}
+
 func TestGenerateIssueLearningReportRejectsIssueWithoutAgent(t *testing.T) {
 	var issueID string
 	if err := testPool.QueryRow(context.Background(), `
