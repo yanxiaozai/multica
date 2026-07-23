@@ -1,0 +1,2 @@
+ALTER TABLE agent
+ADD COLUMN IF NOT EXISTS spec_profile JSONB NOT NULL DEFAULT '{}'::jsonb;

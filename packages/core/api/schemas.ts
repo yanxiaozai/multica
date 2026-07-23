@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentEvolutionApplication,
+  AgentLearningReport,
   AgentTemplate,
   AgentTemplateSummary,
   AgentBuilderSession,
@@ -19,7 +21,12 @@ import type {
   CreateBillingPortalSessionResponse,
   CronPreviewResponse,
   GroupedIssuesResponse,
+  GenerateSquadInstructionsResponse,
   InboxItem,
+  IssueDraftBundle,
+  IssueIntegration,
+  IssueSyncConfig,
+  ListIssueDraftSessionsResponse,
   InboxWorkspaceUnread,
   Label,
   IssueProperty,
@@ -27,11 +34,30 @@ import type {
   IssuePropertiesResponse,
   ListIssuesResponse,
   ListLabelsResponse,
+  ListIssueIntegrationsResponse,
+  ListIssueSyncConfigsResponse,
+  SquadInstructionsGenerationJob,
   ListWebhookDeliveriesResponse,
   NotificationPreferenceResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  SpecDecision,
+  SpecDocument,
+  SpecEpic,
+  SpecIssueContext,
+  SpecIssueMapping,
+  SpecIssueState,
+  SpecModule,
+  SyncSpecFromFilesResponse,
+  ListSpecDocumentsResponse,
+  ListSpecEpicsResponse,
+  ListSpecModulesResponse,
+  UpdateIssueSpecMappingResponse,
+  UpdateIssueSpecStateResponse,
+  UpdateSpecDocumentResponse,
+  CreateSpecDecisionResponse,
+  TestIssueIntegrationResponse,
   Squad,
   TimelineEntry,
   User,
@@ -366,6 +392,118 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
   created_at: "",
 };
 
+const LooseRecordSchema = z.record(z.string(), z.unknown()).default({});
+
+export const IssueDraftSessionSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  project_id: z.string().default(""),
+  squad_id: z.string().default(""),
+  leader_agent_id: z.string().default(""),
+  primary_project_resource_id: z.string().default(""),
+  primary_local_path_snapshot: z.string().default(""),
+  status: z.string().default("clarifying"),
+  created_by: z.string().default(""),
+  created_issue_id: z.string().nullable().optional().default(null),
+  remote_issue_url: z.string().default(""),
+  spec_file_path: z.string().default(""),
+  git_commit_sha: z.string().default(""),
+  last_error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftMessageSchema = z.object({
+  id: z.string().default(""),
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  author_type: z.string().default(""),
+  author_id: z.string().nullable().optional().default(null),
+  message_type: z.string().default(""),
+  content: z.string().default(""),
+  metadata: LooseRecordSchema,
+  created_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftMemberTaskSchema = z.object({
+  id: z.string().default(""),
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  task_id: z.string().nullable().optional().default(null),
+  status: z.string().default(""),
+  skill_basis: z.string().default(""),
+  read_scope: LooseRecordSchema,
+  findings: z.string().default(""),
+  error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftArtifactSchema = z.object({
+  id: z.string().default(""),
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  artifact_type: z.string().default(""),
+  revision: z.number().default(0),
+  content: z.string().default(""),
+  generated_by_agent_id: z.string().nullable().optional().default(null),
+  created_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftConfirmStepSchema = z.object({
+  session_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  step: z.string().default(""),
+  status: z.string().default(""),
+  external_id: z.string().default(""),
+  result_metadata: LooseRecordSchema,
+  error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDraftBundleSchema = z.object({
+  session: IssueDraftSessionSchema,
+  messages: z.array(IssueDraftMessageSchema).default([]),
+  member_tasks: z.array(IssueDraftMemberTaskSchema).default([]),
+  artifacts: z.array(IssueDraftArtifactSchema).default([]),
+  confirm_steps: z.array(IssueDraftConfirmStepSchema).default([]),
+}).loose();
+
+export const ListIssueDraftSessionsResponseSchema = z.object({
+  sessions: z.array(IssueDraftSessionSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_BUNDLE: IssueDraftBundle = {
+  session: {
+    id: "",
+    workspace_id: "",
+    project_id: "",
+    squad_id: "",
+    leader_agent_id: "",
+    primary_project_resource_id: "",
+    primary_local_path_snapshot: "",
+    status: "clarifying",
+    created_by: "",
+    created_issue_id: null,
+    remote_issue_url: "",
+    spec_file_path: "",
+    git_commit_sha: "",
+    last_error: "",
+    created_at: "",
+    updated_at: "",
+  },
+  messages: [],
+  member_tasks: [],
+  artifacts: [],
+  confirm_steps: [],
+};
+
+export const EMPTY_LIST_ISSUE_DRAFT_SESSIONS_RESPONSE: ListIssueDraftSessionsResponse = {
+  sessions: [],
+};
+
 export const CommentSchema = z.object({
   id: z.string(),
   issue_id: z.string(),
@@ -495,6 +633,262 @@ export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   total: 0,
 };
 
+export const SpecEpicSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  description: z.string().default(""),
+  stability: z.string().default("draft"),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_EPIC: SpecEpic = {
+  id: "",
+  workspace_id: "",
+  key: "",
+  title: "",
+  description: "",
+  stability: "draft",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecModuleSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  epic_id: z.string(),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  description: z.string().default(""),
+  stability: z.string().default("draft"),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_MODULE: SpecModule = {
+  id: "",
+  workspace_id: "",
+  epic_id: "",
+  key: "",
+  title: "",
+  description: "",
+  stability: "draft",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecDocumentSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  epic_id: z.string().nullable().optional().default(null),
+  module_id: z.string().nullable().optional().default(null),
+  doc_kind: z.string().default(""),
+  title: z.string().default(""),
+  body: z.string().default(""),
+  source_path: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_DOCUMENT: SpecDocument = {
+  id: "",
+  workspace_id: "",
+  epic_id: null,
+  module_id: null,
+  doc_kind: "",
+  title: "",
+  body: "",
+  source_path: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecIssueMappingSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  issue_id: z.string(),
+  epic_id: z.string().nullable().optional().default(null),
+  module_id: z.string().nullable().optional().default(null),
+  mapping_kind: z.string().default("related"),
+  reason: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_ISSUE_MAPPING: SpecIssueMapping = {
+  id: "",
+  workspace_id: "",
+  issue_id: "",
+  epic_id: null,
+  module_id: null,
+  mapping_kind: "related",
+  reason: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecIssueStateSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  issue_id: z.string(),
+  status: z.string().default("todo"),
+  owner: z.string().default(""),
+  current_stage: z.string().default("requirements"),
+  current_loop: z.string().default("requirements"),
+  last_result: z.string().default("pending"),
+  open_questions: z.array(z.string()).default([]),
+  blockers: z.array(z.string()).default([]),
+  next_handoff: z.string().default(""),
+  audit_mode: z.string().default("required"),
+  audit_skipped: z.boolean().default(false),
+  audit_skip_reason: z.string().default(""),
+  audit_skipped_by: z.string().default(""),
+  audit_skipped_at: z.string().nullable().optional().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_ISSUE_STATE: SpecIssueState = {
+  id: "",
+  workspace_id: "",
+  issue_id: "",
+  status: "todo",
+  owner: "",
+  current_stage: "requirements",
+  current_loop: "requirements",
+  last_result: "pending",
+  open_questions: [],
+  blockers: [],
+  next_handoff: "",
+  audit_mode: "required",
+  audit_skipped: false,
+  audit_skip_reason: "",
+  audit_skipped_by: "",
+  audit_skipped_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const SpecDecisionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  epic_id: z.string().nullable().optional().default(null),
+  module_id: z.string().nullable().optional().default(null),
+  title: z.string().default(""),
+  body: z.string().default(""),
+  actor: z.string().default(""),
+  source_path: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SPEC_DECISION: SpecDecision = {
+  id: "",
+  workspace_id: "",
+  epic_id: null,
+  module_id: null,
+  title: "",
+  body: "",
+  actor: "",
+  source_path: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListSpecEpicsResponseSchema = z.object({
+  epics: z.array(SpecEpicSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SPEC_EPICS_RESPONSE: ListSpecEpicsResponse = {
+  epics: [],
+};
+
+export const ListSpecModulesResponseSchema = z.object({
+  modules: z.array(SpecModuleSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SPEC_MODULES_RESPONSE: ListSpecModulesResponse = {
+  modules: [],
+};
+
+export const ListSpecDocumentsResponseSchema = z.object({
+  documents: z.array(SpecDocumentSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE: ListSpecDocumentsResponse = {
+  documents: [],
+};
+
+export const SpecIssueContextSchema = z.object({
+  issue_id: z.string().default(""),
+  state: SpecIssueStateSchema.nullable().optional().default(null),
+  mappings: z.array(SpecIssueMappingSchema).default([]),
+  documents: z.array(SpecDocumentSchema).default([]),
+  metadata: IssueMetadataSchema,
+}).loose();
+
+export const EMPTY_SPEC_ISSUE_CONTEXT: SpecIssueContext = {
+  issue_id: "",
+  state: null,
+  mappings: [],
+  documents: [],
+  metadata: {},
+};
+
+export const UpdateIssueSpecMappingResponseSchema = z.object({
+  primary: SpecIssueMappingSchema,
+}).loose();
+
+export const EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE: UpdateIssueSpecMappingResponse = {
+  primary: EMPTY_SPEC_ISSUE_MAPPING,
+};
+
+export const UpdateIssueSpecStateResponseSchema = z.object({
+  state: SpecIssueStateSchema,
+}).loose();
+
+export const EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE: UpdateIssueSpecStateResponse = {
+  state: EMPTY_SPEC_ISSUE_STATE,
+};
+
+export const UpdateSpecDocumentResponseSchema = z.object({
+  document: SpecDocumentSchema,
+}).loose();
+
+export const EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE: UpdateSpecDocumentResponse = {
+  document: EMPTY_SPEC_DOCUMENT,
+};
+
+export const CreateSpecDecisionResponseSchema = z.object({
+  decision: SpecDecisionSchema,
+}).loose();
+
+export const EMPTY_CREATE_SPEC_DECISION_RESPONSE: CreateSpecDecisionResponse = {
+  decision: EMPTY_SPEC_DECISION,
+};
+
+export const SyncSpecFromFilesResponseSchema = z.object({
+  epics: z.number().default(0),
+  modules: z.number().default(0),
+  documents: z.number().default(0),
+  issues: z.number().default(0),
+  issue_mappings: z.number().default(0),
+  decisions: z.number().default(0),
+  skipped_issue_files: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_SYNC_SPEC_FROM_FILES_RESPONSE: SyncSpecFromFilesResponse = {
+  epics: 0,
+  modules: 0,
+  documents: 0,
+  issues: 0,
+  issue_mappings: 0,
+  decisions: 0,
+  skipped_issue_files: [],
+};
+
 const SearchIssueResultSchema = IssueSchema.extend({
   match_source: z.string(),
   matched_snippet: z.string().optional(),
@@ -546,6 +940,120 @@ export const SearchProjectsResponseSchema = z.object({
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
+  total: 0,
+};
+
+const JsonObjectSchema = z.record(z.string(), z.unknown()).default({});
+const DefaultIssueStateMapping = { opened: "backlog", closed: "done" };
+const IssueStateMappingSchema = z.record(z.string(), z.unknown()).default(DefaultIssueStateMapping);
+
+const IssueIntegrationSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  provider: z.string().default("gitlab"),
+  name: z.string().default(""),
+  base_url: z.string().default(""),
+  default_issue_skill_id: z.string().nullable().default(null),
+  polling_enabled: z.boolean().default(false),
+  default_poll_interval_seconds: z.number().default(300),
+  config: JsonObjectSchema,
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueIntegrationResponseSchema = IssueIntegrationSchema;
+
+export const EMPTY_ISSUE_INTEGRATION: IssueIntegration = {
+  id: "",
+  workspace_id: "",
+  provider: "gitlab",
+  name: "",
+  base_url: "",
+  default_issue_skill_id: null,
+  polling_enabled: false,
+  default_poll_interval_seconds: 300,
+  config: {},
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListIssueIntegrationsResponseSchema = z.object({
+  integrations: z.array(IssueIntegrationSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE: ListIssueIntegrationsResponse = {
+  integrations: [],
+  total: 0,
+};
+
+export const TestIssueIntegrationResponseSchema = z.object({
+  ok: z.boolean().default(false),
+  provider: z.string().default("gitlab"),
+  username: z.string().default(""),
+  name: z.string().default(""),
+}).loose();
+
+export const EMPTY_TEST_ISSUE_INTEGRATION_RESPONSE: TestIssueIntegrationResponse = {
+  ok: false,
+  provider: "gitlab",
+  username: "",
+  name: "",
+};
+
+const IssueSyncConfigSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  integration_id: z.string().default(""),
+  scope_type: z.string().default("project"),
+  scope_id: z.string().default(""),
+  remote_project_ref: z.string().default(""),
+  sync_enabled: z.boolean().default(false),
+  poll_interval_seconds: z.number().nullable().default(null),
+  state_mapping: IssueStateMappingSchema,
+  sync_mode: z.enum(["assigned_to_me", "auto_accept"]).default("assigned_to_me"),
+  auto_accept_label: z.string().default("ai-auto"),
+  auto_assign_enabled: z.boolean().default(false),
+  default_assignee_type: z.string().nullable().default(null),
+  default_assignee_id: z.string().nullable().default(null),
+  last_poll_at: z.string().nullable().default(null),
+  last_successful_poll_at: z.string().nullable().default(null),
+  last_error: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueSyncConfigResponseSchema = IssueSyncConfigSchema;
+
+export const EMPTY_ISSUE_SYNC_CONFIG: IssueSyncConfig = {
+  id: "",
+  workspace_id: "",
+  integration_id: "",
+  scope_type: "project",
+  scope_id: "",
+  remote_project_ref: "",
+  sync_enabled: false,
+  poll_interval_seconds: null,
+  state_mapping: DefaultIssueStateMapping,
+  sync_mode: "assigned_to_me",
+  auto_accept_label: "ai-auto",
+  auto_assign_enabled: false,
+  default_assignee_type: null,
+  default_assignee_id: null,
+  last_poll_at: null,
+  last_successful_poll_at: null,
+  last_error: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListIssueSyncConfigsResponseSchema = z.object({
+  sync_configs: z.array(IssueSyncConfigSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE: ListIssueSyncConfigsResponse = {
+  sync_configs: [],
   total: 0,
 };
 
@@ -983,6 +1491,78 @@ export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
   runtime_id: "",
 };
 
+export const AgentEvolutionApplicationSchema = z.object({
+  id: z.string().default(""),
+  suggestion_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  applied_by: z.string().nullable().default(null),
+  target_type: z.enum(["agent", "skill"]).catch("agent"),
+  target_id: z.string().default(""),
+  before_content: z.string().default(""),
+  after_content: z.string().default(""),
+  created_at: z.string().default(""),
+}).loose();
+
+export const AgentEvolutionSuggestionSchema = z.object({
+  id: z.string().default(""),
+  report_id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  scope: z.enum(["personal_agent", "workspace_skill", "builtin_skill_candidate"]).catch("personal_agent"),
+  risk: z.enum(["safe", "review", "manual"]).catch("review"),
+  status: z.enum(["pending", "applied", "dismissed"]).catch("pending"),
+  target_type: z.enum(["agent", "skill", "builtin_skill"]).catch("agent"),
+  target_id: z.string().nullable().default(null),
+  title: z.string().default(""),
+  rationale: z.string().default(""),
+  proposed_content: z.string().default(""),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  applications: z.array(AgentEvolutionApplicationSchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  applied_at: z.string().nullable().default(null),
+  dismissed_at: z.string().nullable().default(null),
+}).loose();
+
+export const AgentLearningReportSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  issue_id: z.string().nullable().default(null),
+  task_id: z.string().nullable().default(null),
+  agent_id: z.string().default(""),
+  summary: z.string().default(""),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  suggestions: z.array(AgentEvolutionSuggestionSchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const AgentLearningReportListSchema = z.array(AgentLearningReportSchema);
+
+export const EMPTY_AGENT_EVOLUTION_APPLICATION: AgentEvolutionApplication = {
+  id: "",
+  suggestion_id: "",
+  workspace_id: "",
+  applied_by: null,
+  target_type: "agent",
+  target_id: "",
+  before_content: "",
+  after_content: "",
+  created_at: "",
+};
+
+export const EMPTY_AGENT_LEARNING_REPORT: AgentLearningReport = {
+  id: "",
+  workspace_id: "",
+  issue_id: null,
+  task_id: null,
+  agent_id: "",
+  summary: "",
+  metadata: {},
+  suggestions: [],
+  created_at: "",
+  updated_at: "",
+};
+
 // Squad list responses carry lightweight membership previews used by hover
 // cards. The preview fields are additive API fields, so older backends default
 // cleanly to no preview instead of breaking newer frontends.
@@ -1026,6 +1606,43 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
+};
+
+export const GenerateSquadInstructionsResponseSchema = z.object({
+  instructions: z.string().default(""),
+  mode: z.string().default("template"),
+  warnings: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_GENERATE_SQUAD_INSTRUCTIONS_RESPONSE: GenerateSquadInstructionsResponse = {
+  instructions: "",
+  mode: "template",
+  warnings: [],
+};
+
+export const SquadInstructionsGenerationJobSchema = z.object({
+  id: z.string().default(""),
+  job_id: z.string().optional(),
+  task_id: z.string().nullable().optional().transform((v) => v ?? null),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).catch("failed"),
+  mode: z.string().default("agent_docs"),
+  instructions: z.string().default(""),
+  error: z.string().nullable().optional().transform((v) => v ?? null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  completed_at: z.string().nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB: SquadInstructionsGenerationJob = {
+  id: "",
+  task_id: null,
+  status: "failed",
+  mode: "agent_docs",
+  instructions: "",
+  error: null,
+  created_at: "",
+  updated_at: "",
+  completed_at: null,
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status

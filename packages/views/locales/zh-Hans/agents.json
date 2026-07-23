@@ -244,9 +244,11 @@
     "page_navigation_aria": "智能体页面",
     "section_navigation_aria": "智能体分区",
     "activity": "动态",
-    "tasks": "Tasks",
+    "tasks": "执行任务",
     "instructions": "指令",
+    "spec_profile": "Spec Profile",
     "skills": "Skills",
+    "learning": "学习",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
@@ -415,6 +417,24 @@
       "upload_failed_toast": "头像上传失败"
     }
   },
+  "import_button": {
+    "label": "从 Claude Code 导入"
+  },
+  "import_dialog": {
+    "title": "从 Claude Code 导入",
+    "description": "从本地 ~/.claude/agents/ 目录导入子 agent，每个会成为同名的 workspace 智能体，并保留描述与 instructions。",
+    "list_label": "智能体",
+    "loading": "正在读取本地 agent…",
+    "empty": "未在 ~/.claude/agents/ 找到 Claude Code agent，请先安装或运行 Claude Code。",
+    "select_all": "全选",
+    "deselect_all": "取消全选",
+    "body_chars_other": "{{count}} 个字符",
+    "selected_count_other": "已选 {{count}} 个",
+    "import_other": "导入 {{count}} 个智能体",
+    "importing": "导入中…",
+    "toast_success_other": "已导入 {{count}} 个智能体",
+    "toast_partial_failure_other": "{{count}} 个智能体导入失败（可能已存在）：{{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "保存",
@@ -425,6 +445,15 @@
       "intro": "设置每个任务都会使用的 System Prompt，支持 Markdown。",
       "system_prompt_label": "System Prompt",
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
+    },
+    "spec_profile": {
+      "intro": "结构化的 Spec Memory 角色配置。用它声明这个智能体负责产出哪些长期 .spec 文档；全局存储规则由平台 prompt 负责。",
+      "placeholder": "{\n  \"primary_outputs\": [\"requirements.md\"],\n  \"contributes\": [\"acceptance.md\"],\n  \"audit_role\": \"requirements-gate\"\n}",
+      "editor_aria": "Spec profile JSON 编辑器",
+      "invalid_json": "JSON 无效：{{error}}",
+      "invalid_not_object": "Spec profile 必须是 JSON 对象。",
+      "saved_toast": "已保存 Spec profile",
+      "save_failed_toast": "保存 Spec profile 失败"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
@@ -615,6 +644,44 @@
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
     },
+    "learning": {
+      "auto_title": "自动进化安全的智能体学习",
+      "auto_hint": "当 Learning Report 提出安全的个人智能体改进时，Multica 可以自动追加到该智能体指令里。Skill 和人工复核建议仍需手动确认。",
+      "auto_enabled_toast": "已开启自动进化",
+      "auto_disabled_toast": "已关闭自动进化",
+      "reports_title": "Learning Reports",
+      "reports_hint": "{{count}} 条待处理建议",
+      "refresh": "刷新",
+      "empty_title": "还没有 Learning Report",
+      "empty_hint": "issue 工作完成并记录该智能体学到了什么、哪些指令或 skill 可改进后，会在这里出现报告。",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "{{count}} 条建议",
+      "no_suggestions": "这份报告没有建议。",
+      "suggestion_fallback": "进化建议",
+      "apply_agent_action": "进化智能体",
+      "apply_skill_action": "更新 Skill",
+      "applied_action": "已应用",
+      "dismissed_action": "已忽略",
+      "manual_action": "人工复核",
+      "builtin_action": "候选项",
+      "apply_success_toast": "已应用进化建议",
+      "apply_failed_toast": "应用进化建议失败",
+      "scope": {
+        "personal_agent": "智能体",
+        "workspace_skill": "Skill",
+        "builtin_skill_candidate": "内置候选"
+      },
+      "risk": {
+        "safe": "安全",
+        "review": "需复核",
+        "manual": "人工"
+      },
+      "status": {
+        "pending": "待处理",
+        "applied": "已应用",
+        "dismissed": "已忽略"
+      }
+    },
     "integrations": {
       "intro": "把这个智能体连接到外部聊天平台，让大家在自己熟悉的工具里直接与它协作。",
       "members_note": "只有工作区的所有者和管理员才能把智能体连接到外部聊天平台。你可以在「设置 → 集成」中查看已连接的 Bot。"
@@ -653,6 +720,8 @@
       "source_chat": "聊天",
       "source_autopilot": "自动化",
       "source_untracked": "未追踪",
+      "source_squad_instructions_generation": "AI 草稿生成",
+      "source_squad_instructions_generation_short": "AI 草稿",
       "source_quick_create": "快速创建",
       "source_creating_issue": "正在创建 issue",
       "source_chat_session": "聊天会话",
@@ -669,6 +738,31 @@
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
       "queued_prefix": "{{when}}排队"
+    },
+    "tasks": {
+      "search_placeholder": "搜索 task run...",
+      "filter": {
+        "all": "全部",
+        "active": "进行中",
+        "finished": "已结束"
+      },
+      "empty_title": "还没有 task run",
+      "empty_description": "这个智能体从 issue、聊天、快速创建或自动化开始运行后，记录会出现在这里。",
+      "no_match_title": "没有匹配的 task run",
+      "no_match_description": "试试不同的搜索词或状态筛选。",
+      "show_more": "已显示 {{shown}} / {{total}}，加载更多",
+      "open_issue": "Issue",
+      "created_prefix": "{{when}}创建",
+      "completed_prefix": "{{when}}结束",
+      "status": {
+        "queued": "排队中",
+        "dispatched": "已派发",
+        "waiting_local_directory": "等待本地目录",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      }
     }
   },
   "char_counter": {
@@ -740,6 +834,9 @@
     "status_running": "进行中",
     "status_completed": "已完成",
     "status_failed": "失败",
+    "view_label": "记录视图",
+    "view_events": "事件",
+    "view_raw": "原文",
     "filter": "筛选",
     "clear_filters": "清除筛选",
     "tool_calls_other": "{{count}} 次工具调用",
@@ -751,6 +848,10 @@
     "waiting_events": "等待事件中...",
     "antigravity_live_unavailable": "Antigravity 暂不提供实时执行事件。task 完成后即可查看执行记录。",
     "no_data": "未记录执行数据。",
+    "thinking": "思考",
+    "tool": "工具",
+    "tool_result": "{{tool}} 结果",
+    "changed_files": "改动文件",
     "sort_label": "排序",
     "sort_chronological": "时间顺序",
     "sort_newest_first": "最新在前",

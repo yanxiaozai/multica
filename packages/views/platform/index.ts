@@ -6,8 +6,14 @@ export {
   isDesktopShell,
   pickDirectory,
   validateLocalDirectory,
+  detectGitRemote,
+  readSpecSnapshot,
+  parseGitRemote,
   type PickDirectoryResult,
   type ValidateLocalDirectoryResult,
+  type DetectGitRemoteResult,
+  type ReadSpecSnapshotResult,
+  type ParsedGitRemote,
 } from "./local-directory";
 export {
   useLocalDaemonStatus,
@@ -19,3 +25,10 @@ export {
   useRestoredScrollRef,
   type ScrollRestorationAdapter,
 } from "./scroll-restoration";
+export {
+  isClaudeAgentImportSupported,
+  listClaudeAgentFiles,
+  parseClaudeAgentFile,
+  type ClaudeAgentFile,
+  type ClaudeAgentDefinition,
+} from "./claude-agents";

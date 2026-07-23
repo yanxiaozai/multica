@@ -39,6 +39,30 @@ type ToolKey =
   | "searching_web"
   | "fallback";
 
+const ACTIVE_STATUSES = new Set([
+  "queued",
+  "dispatched",
+  "waiting_local_directory",
+  "running",
+]);
+
+export function isActiveTaskStatus(status: string | undefined): boolean {
+  return !!status && ACTIVE_STATUSES.has(status);
+}
+
+export function resolveEffectiveTaskStatus(
+  status: string | undefined,
+  taskMessages: readonly TaskMessagePayload[],
+): string | undefined {
+  if (
+    taskMessages.length > 0 &&
+    (status === "queued" || status === "dispatched")
+  ) {
+    return "running";
+  }
+  return status;
+}
+
 // Tool slug → translation key. Unknown tools fall back to "Working".
 const TOOL_KEY_BY_SLUG: Record<string, Exclude<ToolKey, "fallback">> = {
   bash: "running_command",
@@ -155,10 +179,10 @@ export function TaskStatusPill({
     return () => clearInterval(timer);
   }, []);
 
-  // Effective status — defense-in-depth derive on top of the cache. If any
-  // task_message has streamed in, the daemon has by definition started
-  // running; we trust that observation over a stale cache.
-  const status = taskMessages.length > 0 ? "running" : pendingTask.status;
+  // Effective status — defense-in-depth derive on top of the cache. A streamed
+  // task_message proves that an active queued/dispatched task has reached the
+  // daemon, but it must not override a server-terminal failed/cancelled row.
+  const status = resolveEffectiveTaskStatus(pendingTask.status, taskMessages);
   const elapsedSecs = Math.max(0, Math.floor((now - anchor) / 1000));
   const stage = resolveStage(status, taskMessages, availability);
 

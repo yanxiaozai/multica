@@ -95,7 +95,8 @@ export interface WSMessage<T = unknown> {
 }
 
 export interface IssueCreatedPayload {
-  issue: Issue;
+  issue?: Issue;
+  issue_id?: string;
 }
 
 export interface IssueUpdatedPayload {

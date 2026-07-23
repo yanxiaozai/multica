@@ -194,6 +194,135 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("issue bridge integrations", () => {
+    it("falls back to an empty list when integrations are malformed", async () => {
+      stubFetchJson({ integrations: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueIntegrations();
+      expect(res).toEqual({ integrations: [], total: 0 });
+    });
+
+    it("defaults optional fields and preserves future integration fields", async () => {
+      stubFetchJson({
+        integrations: [
+          {
+            id: "int-1",
+            workspace_id: "ws-1",
+            provider: "gitlab",
+            name: "GitLab",
+            base_url: "https://gitlab.example.com",
+            created_at: "2026-06-26T00:00:00Z",
+            updated_at: "2026-06-26T00:00:00Z",
+            future_field: { enabled: true },
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueIntegrations();
+      expect(res.integrations[0]?.default_issue_skill_id).toBeNull();
+      expect(res.integrations[0]?.polling_enabled).toBe(false);
+      expect(res.integrations[0]?.config).toEqual({});
+      expect(
+        (res.integrations[0] as unknown as Record<string, unknown>).future_field,
+      ).toEqual({ enabled: true });
+    });
+
+    it("falls back when create integration returns a malformed row", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.createGitLabIssueIntegration({
+        base_url: "https://gitlab.example.com",
+        token: "secret-token",
+      });
+      expect(res).toMatchObject({ id: "", provider: "gitlab", config: {} });
+    });
+
+    it("falls back when update integration returns a malformed row", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.updateIssueIntegration("int-1", {
+        name: "GitLab",
+        base_url: "https://gitlab.example.com",
+      });
+      expect(res).toMatchObject({ id: "", provider: "gitlab", config: {} });
+    });
+
+    it("falls back when test integration returns a malformed response", async () => {
+      stubFetchJson({ ok: "yes" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.testIssueIntegration("int-1");
+      expect(res).toEqual({ ok: false, provider: "gitlab", username: "", name: "" });
+    });
+  });
+
+  describe("issue bridge sync configs", () => {
+    it("falls back to an empty list when sync configs are malformed", async () => {
+      stubFetchJson({ sync_configs: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueSyncConfigs();
+      expect(res).toEqual({ sync_configs: [], total: 0 });
+    });
+
+    it("defaults nullable sync config fields", async () => {
+      stubFetchJson({
+        sync_configs: [
+          {
+            id: "cfg-1",
+            workspace_id: "ws-1",
+            integration_id: "int-1",
+            scope_type: "repo_resource",
+            scope_id: "resource-1",
+            remote_project_ref: "group/project",
+            created_at: "2026-06-26T00:00:00Z",
+            updated_at: "2026-06-26T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueSyncConfigs();
+      expect(res.sync_configs[0]?.poll_interval_seconds).toBeNull();
+      expect(res.sync_configs[0]?.state_mapping).toEqual({
+        opened: "backlog",
+        closed: "done",
+      });
+      expect(res.sync_configs[0]?.default_assignee_type).toBeNull();
+      expect(res.sync_configs[0]?.last_error).toBe("");
+    });
+
+    it("falls back when create sync config returns a malformed row", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.createIssueSyncConfig({
+        integration_id: "int-1",
+        scope_type: "project",
+        scope_id: "project-1",
+        remote_project_ref: "group/project",
+      });
+      expect(res).toMatchObject({
+        id: "",
+        scope_type: "project",
+        state_mapping: { opened: "backlog", closed: "done" },
+        default_assignee_type: null,
+      });
+    });
+
+    it("falls back when update sync config returns a malformed row", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.updateIssueSyncConfig("cfg-1", {
+        remote_project_ref: "group/project",
+      });
+      expect(res).toMatchObject({
+        id: "",
+        scope_type: "project",
+        state_mapping: { opened: "backlog", closed: "done" },
+        default_assignee_type: null,
+      });
+    });
+  });
+
   describe("listAutopilots", () => {
     const baseAutopilot = {
       id: "ap-1",

@@ -743,6 +743,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if handshakeTimeout <= 0 {
 		handshakeTimeout = defaultCodexHandshakeTimeout
 	}
+	firstTurnNoProgressTimeout := opts.FirstTurnNoProgressTimeout
+	if firstTurnNoProgressTimeout == 0 {
+		firstTurnNoProgressTimeout = codexFirstTurnNoProgressTimeout(semanticInactivityTimeout)
+	}
 	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
@@ -993,6 +997,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				<-readerDone
 			}
 
+			// Codex app-server can spawn MCP/tool subprocesses that outlive
+			// the app-server itself while staying in this process group. Once
+			// stdout is drained, we are done with the session; send a final
+			// group kill before Wait reaps the leader so those descendants do
+			// not stay behind as orphaned chrome-devtools-mcp/npm processes.
+			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+
 			// Phase 2: bound cmd.Wait() in case the process is still alive
 			// (scanner-overflow case: reader exited early on its own while
 			// codex stayed blocked writing into a full stdout pipe).
@@ -1165,7 +1176,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
 
-		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout)
 		var firstTurnNoProgressTimer *time.Timer
 		var firstTurnNoProgressTimerC <-chan time.Time
 		firstTurnStarted := false

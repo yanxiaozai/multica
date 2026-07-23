@@ -330,6 +330,40 @@ func (h *Handler) GetSquad(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) GenerateSquadInstructions(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Mode == "" {
+		req.Mode = "template"
+	}
+	if req.Mode != "template" {
+		writeError(w, http.StatusBadRequest, "mode must be template")
+		return
+	}
+
+	resp, err := h.generateSquadInstructions(r.Context(), squad)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate squad instructions")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
 	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
@@ -973,10 +1007,71 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		},
 	})
 
+	if req.Outcome == "failed" || req.Outcome == "no_action" {
+		h.promoteSquadTerminalIssueToReview(r, issue, task, actorID, req.Outcome)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":         uuidToString(activity.ID),
 		"action":     activity.Action,
 		"created_at": timestampToString(activity.CreatedAt),
+	})
+}
+
+func (h *Handler) promoteSquadTerminalIssueToReview(r *http.Request, issue db.Issue, task db.AgentTaskQueue, actorID, outcome string) {
+	if issue.Status != "in_progress" || !task.IssueID.Valid {
+		return
+	}
+
+	hasOtherActive, err := h.Queries.HasOtherActiveTaskForIssue(r.Context(), db.HasOtherActiveTaskForIssueParams{
+		IssueID: issue.ID,
+		ID:      task.ID,
+	})
+	if err != nil {
+		slog.Warn("squad terminal evaluation: active task check failed",
+			"issue_id", uuidToString(issue.ID),
+			"task_id", uuidToString(task.ID),
+			"outcome", outcome,
+			"error", err,
+		)
+		return
+	}
+	if hasOtherActive {
+		return
+	}
+
+	updated, err := h.Queries.UpdateIssueStatusIfCurrent(r.Context(), db.UpdateIssueStatusIfCurrentParams{
+		ID:            issue.ID,
+		NextStatus:    "in_review",
+		WorkspaceID:   issue.WorkspaceID,
+		CurrentStatus: "in_progress",
+	})
+	if err != nil {
+		slog.Warn("squad terminal evaluation: promote issue to review failed",
+			"issue_id", uuidToString(issue.ID),
+			"task_id", uuidToString(task.ID),
+			"outcome", outcome,
+			"error", err,
+		)
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	resp := issueToResponse(updated, h.getIssuePrefix(r.Context(), issue.WorkspaceID))
+	h.publish(protocol.EventIssueUpdated, workspaceID, "agent", actorID, map[string]any{
+		"issue":               resp,
+		"status_changed":      true,
+		"priority_changed":    false,
+		"assignee_changed":    false,
+		"description_changed": false,
+		"title_changed":       false,
+		"project_changed":     false,
+		"start_date_changed":  false,
+		"due_date_changed":    false,
+		"prev_status":         issue.Status,
+		"prev_priority":       issue.Priority,
+		"prev_assignee_type":  textToPtr(issue.AssigneeType),
+		"prev_assignee_id":    uuidToPtr(issue.AssigneeID),
 	})
 }
 

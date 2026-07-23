@@ -319,7 +319,7 @@ export interface AgentTask {
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "squad_instructions_generation" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts). This is
@@ -355,6 +355,7 @@ export interface Agent {
   name: string;
   description: string;
   instructions: string;
+  spec_profile?: Record<string, unknown>;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -443,6 +444,12 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /**
+   * When true, newly-created Learning Reports may automatically apply safe
+   * personal-agent suggestions to this agent's instructions. Review/manual
+   * and workspace-skill suggestions still require an explicit apply action.
+   */
+  agent_evolution_enabled?: boolean;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -490,6 +497,7 @@ export interface CreateAgentRequest {
   name: string;
   description?: string;
   instructions?: string;
+  spec_profile?: Record<string, unknown>;
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
@@ -607,6 +615,7 @@ export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
+  spec_profile?: Record<string, unknown>;
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
@@ -664,6 +673,7 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  agent_evolution_enabled?: boolean;
 }
 
 /**
@@ -743,6 +753,83 @@ export interface UpdateSkillRequest {
 
 export interface SetAgentSkillsRequest {
   skill_ids: string[];
+}
+
+export type AgentEvolutionScope =
+  | "personal_agent"
+  | "workspace_skill"
+  | "builtin_skill_candidate";
+
+export type AgentEvolutionRisk = "safe" | "review" | "manual";
+
+export type AgentEvolutionSuggestionStatus = "pending" | "applied" | "dismissed";
+
+export type AgentEvolutionTargetType = "agent" | "skill" | "builtin_skill";
+
+export interface AgentEvolutionApplication {
+  id: string;
+  suggestion_id: string;
+  workspace_id: string;
+  applied_by: string | null;
+  target_type: "agent" | "skill";
+  target_id: string;
+  before_content: string;
+  after_content: string;
+  created_at: string;
+}
+
+export interface AgentEvolutionSuggestion {
+  id: string;
+  report_id: string;
+  workspace_id: string;
+  scope: AgentEvolutionScope;
+  risk: AgentEvolutionRisk;
+  status: AgentEvolutionSuggestionStatus;
+  target_type: AgentEvolutionTargetType;
+  target_id: string | null;
+  title: string;
+  rationale: string;
+  proposed_content: string;
+  metadata: Record<string, unknown>;
+  applications: AgentEvolutionApplication[];
+  created_at: string;
+  updated_at: string;
+  applied_at: string | null;
+  dismissed_at: string | null;
+}
+
+export interface AgentLearningReport {
+  id: string;
+  workspace_id: string;
+  issue_id: string | null;
+  task_id: string | null;
+  agent_id: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  suggestions: AgentEvolutionSuggestion[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAgentEvolutionSuggestionRequest {
+  scope: AgentEvolutionScope;
+  risk?: AgentEvolutionRisk;
+  target_type?: AgentEvolutionTargetType;
+  target_id?: string;
+  title?: string;
+  rationale?: string;
+  proposed_content: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateAgentLearningReportRequest {
+  workspace_id?: string;
+  issue_id?: string | null;
+  task_id?: string | null;
+  agent_id: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+  suggestions?: CreateAgentEvolutionSuggestionRequest[];
 }
 
 export interface IssueUsageSummary {

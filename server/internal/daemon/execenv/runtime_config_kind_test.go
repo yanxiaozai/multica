@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestClassifyTask pins the precedence rule on classifyTask. All five
+// TestClassifyTask pins the precedence rule on classifyTask. All six
 // kinds plus tiebreak cases for safety.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
@@ -14,12 +14,14 @@ func TestClassifyTask(t *testing.T) {
 		ctx  TaskContextForEnv
 		want taskKind
 	}{
+		{"squad-instructions-generation", TaskContextForEnv{SquadInstructionsGenerationPrompt: "generate"}, kindSquadInstructionsGeneration},
 		{"chat", TaskContextForEnv{ChatSessionID: "c"}, kindChat},
 		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "p"}, kindQuickCreate},
 		{"autopilot", TaskContextForEnv{AutopilotRunID: "r"}, kindAutopilotRunOnly},
 		{"comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindCommentTriggered},
 		{"assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindAssignmentTriggered},
 		{"assignment-bare", TaskContextForEnv{}, kindAssignmentTriggered},
+		{"tiebreak-generation-vs-chat", TaskContextForEnv{SquadInstructionsGenerationPrompt: "generate", ChatSessionID: "c"}, kindSquadInstructionsGeneration},
 		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
 		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
 		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
@@ -43,6 +45,7 @@ func TestTaskKindHasIssueContext(t *testing.T) {
 		kind taskKind
 		want bool
 	}{
+		{kindSquadInstructionsGeneration, false},
 		{kindCommentTriggered, true},
 		{kindAssignmentTriggered, true},
 		{kindAutopilotRunOnly, false},
@@ -92,7 +95,8 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		mustHave map[taskKind]bool
 	}
 	allKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
+		kindSquadInstructionsGeneration: true,
+		kindCommentTriggered:            true, kindAssignmentTriggered: true,
 		kindAutopilotRunOnly: true, kindQuickCreate: true, kindChat: true,
 	}
 	issueKinds := map[taskKind]bool{
@@ -123,6 +127,8 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 	}
 
 	fixtures := map[taskKind]TaskContextForEnv{
+		kindSquadInstructionsGeneration: {SquadInstructionsGenerationPrompt: "Summarize agent docs.", AgentName: "Eve", AgentID: "eve-1",
+			Repos: baseRepo, AgentSkills: baseSkill},
 		kindChat: {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
 		kindQuickCreate: {QuickCreatePrompt: "p", AgentName: "Eve", AgentID: "eve-1",
@@ -148,6 +154,123 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			if !want && present {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
+		}
+	}
+}
+
+func TestSquadInstructionsGenerationOutputDoesNotRequireIssueComment(t *testing.T) {
+	cases := []struct {
+		name string
+	}{
+		{name: "default"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := buildMetaSkillContent("claude", TaskContextForEnv{
+				SquadInstructionsGenerationPrompt: "Summarize agent docs.",
+				AgentName:                         "Leader",
+				AgentID:                           "leader-1",
+			})
+			for _, want := range []string{
+				"This is a squad instructions generation task",
+				"Return only the final markdown instructions",
+				"Do NOT create issues, comments, files, commits, branches, or chat messages",
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s brief missing %q\n---\n%s", tc.name, want, out)
+				}
+			}
+			for _, banned := range []string{
+				"Final results MUST be delivered via `multica issue comment add`",
+				"Post exactly ONE comment per run",
+			} {
+				if strings.Contains(out, banned) {
+					t.Fatalf("%s brief should not require issue comments; found %q\n---\n%s", tc.name, banned, out)
+				}
+			}
+		})
+	}
+}
+
+func TestSlimAssignmentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	const issueID = "issue-squad-slim"
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:       issueID,
+		IsSquadLeader: true,
+	})
+
+	for _, want := range []string{
+		"You are acting as the squad leader for this assignment.",
+		"Your job is delegation and coordination only.",
+		"Choose the best squad member from your Squad Roster",
+		"Delegate exactly once",
+		"multica squad activity " + issueID + " action",
+		"Stop immediately after the delegation/activity record.",
+		"Do NOT implement the issue yourself",
+		"Squad leader output is delegation, not implementation.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slim squad-leader assignment brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"Complete the task within your Agent Identity boundaries.",
+		"Run `multica issue status " + issueID + " in_progress`",
+		"When done, run `multica issue status " + issueID + " in_review`",
+		"Final results MUST be delivered via `multica issue comment add`",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("slim squad-leader assignment brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
+func TestSlimCommentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	const issueID = "issue-squad-comment-slim"
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: "comment-1",
+		IsSquadLeader:    true,
+	})
+
+	for _, want := range []string{
+		"Act only as squad leader.",
+		"delegate exactly once to the best squad member",
+		"Do not solve the issue in the leader turn.",
+		"multica squad activity " + issueID + " action",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slim comment-triggered squad-leader brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"do any requested work first",
+		"post the result via step 7",
+		"If you produced actual work this turn",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("slim comment-triggered squad-leader brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
+func TestSlimSquadInstructionsGenerationOmitsRepoAndSkillLists(t *testing.T) {
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		SquadInstructionsGenerationPrompt: "Summarize agent docs.",
+		AgentName:                         "Eve",
+		AgentID:                           "eve-1",
+		Repos:                             []RepoContextForEnv{{URL: "https://example.com/x.git", Description: "x"}},
+		AgentSkills:                       []SkillContextForEnv{{Name: "skill-x", Description: "x"}},
+	})
+
+	for _, bad := range []string{
+		"## Repositories",
+		"## Skills",
+		"https://example.com/x.git",
+		"skill-x",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("slim squad-instructions brief should omit %q\n---\n%s", bad, out)
 		}
 	}
 }

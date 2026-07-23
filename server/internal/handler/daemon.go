@@ -1617,6 +1617,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		var specProfile json.RawMessage
+		if sp := bytes.TrimSpace(agent.SpecProfile); len(sp) > 0 && !bytes.Equal(sp, []byte("{}")) && !bytes.Equal(sp, []byte("null")) {
+			specProfile = json.RawMessage(agent.SpecProfile)
+		}
 		// Layer the per-task overlay (set at enqueue from the initiator
 		// user's active integrations — currently Composio) on top of the
 		// agent's saved mcp_config. Overlay wins on server-name collisions
@@ -1642,6 +1646,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			ID:                    uuidToString(agent.ID),
 			Name:                  agent.Name,
 			Instructions:          agent.Instructions,
+			SpecProfile:           specProfile,
 			CustomEnv:             customEnv,
 			CustomArgs:            customArgs,
 			McpConfig:             mcpConfig,
@@ -1709,6 +1714,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			resp.IssueNumber = issue.Number
+			if bridge, err := h.Queries.GetIssueBridgeItemByIssue(r.Context(), db.GetIssueBridgeItemByIssueParams{
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     issue.ID,
+			}); err == nil && bridge.RemoteIid > 0 && bridge.RemoteIid <= int64(^uint32(0)>>1) {
+				resp.IssueNumber = int32(bridge.RemoteIid)
+			}
 			resp.ThreadName = issue.Title
 
 			// Squad-leader briefing injection: keyed off the task being a
@@ -2238,11 +2250,91 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// resp came from above), so the daemon's prompt + issue_context.md render the
 	// assignment-handoff branch. Empty for all other task kinds.
 
+	// Internal squad-instructions generation task: no issue / chat /
+	// autopilot link — workspace and prompt come from the task's context
+	// JSONB. Resolve workspace from there so the isolation check below has
+	// something to compare.
+	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+		var gen service.SquadInstructionsGenerationContext
+		if json.Unmarshal(task.Context, &gen) == nil && gen.Type == service.SquadInstructionsGenerationContextType {
+			resp.SquadInstructionsGenerationPrompt = gen.Prompt
+			resp.ThreadName = "Generate squad instructions"
+			resp.WorkspaceID = gen.WorkspaceID
+		}
+	}
+
+	// Issue draft task: no issue / chat / autopilot link. The task is
+	// read-only pre-confirmation work for a draft session, so the daemon gets
+	// enough project/resource context to inspect code but the prompt forbids
+	// mutations.
+	if resp.SquadInstructionsGenerationPrompt == "" && task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+		var draft service.IssueDraftContext
+		if json.Unmarshal(task.Context, &draft) == nil && draft.Type == service.IssueDraftContextType {
+			resp.IssueDraftSessionID = draft.SessionID
+			resp.IssueDraftMemberTaskID = draft.MemberTaskID
+			resp.IssueDraftRole = draft.Role
+			resp.IssueDraftPrompt = draft.Prompt
+			resp.IssueDraftReadOnly = true
+			resp.IssueDraftPrimaryLocalPath = draft.PrimaryLocalPath
+			resp.ThreadName = "Issue draft: " + draft.SessionID
+			resp.WorkspaceID = draft.WorkspaceID
+			resp.ProjectID = draft.ProjectID
+			resp.SquadID = draft.SquadID
+
+			var projectRepos []RepoData
+			if draft.ProjectID != "" {
+				if projectUUID, err := util.ParseUUID(draft.ProjectID); err == nil {
+					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
+						resp.ProjectTitle = proj.Title
+						resp.ProjectDescription = proj.Description.String
+					}
+					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
+						out := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							out = append(out, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct {
+									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
+								}
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+								}
+							}
+						}
+						resp.ProjectResources = out
+					}
+				}
+			}
+			if len(projectRepos) > 0 {
+				resp.Repos = projectRepos
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(draft.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
+	}
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
-	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+	if resp.SquadInstructionsGenerationPrompt == "" && resp.IssueDraftPrompt == "" && task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
 		var qc service.QuickCreateContext
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
@@ -2392,6 +2484,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
+			"has_issue_draft", resp.IssueDraftPrompt != "",
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",

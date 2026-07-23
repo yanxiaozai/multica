@@ -46,6 +46,11 @@ server/tmp/
 server/migrate
 server/daemon
 server/multica
+server/.gocache/
+server/.gomodcache/
+.gocache/
+# package manager caches
+.pnpm-store/
 
 # Test artifacts
 test-results/
@@ -62,6 +67,7 @@ apps/web/test-results/
 
 # feature tracking
 _features/
+.superpowers/
 
 # runtime
 *.pid

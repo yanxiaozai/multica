@@ -1,16 +1,13 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
-import {
-  NavigationProvider,
-  type NavigationAdapter,
-} from "../../navigation";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
@@ -19,19 +16,15 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 // not what each tab does, so we stub the heavy children.
 vi.mock("./tabs/activity-tab", () => ({
   ActivityTab: () => <div>activity-tab</div>,
-  AgentPerformanceSummary: () => <div>performance-summary</div>,
-}));
-vi.mock("./agent-overview-summary", () => ({
-  AgentOverviewSummary: () => <div>agent-overview-summary</div>,
-}));
-vi.mock("./agent-access-settings", () => ({
-  AgentAccessSettings: () => <div>agent-access-settings</div>,
 }));
 vi.mock("./tabs/instructions-tab", () => ({
   InstructionsTab: () => <div>instructions-tab</div>,
 }));
 vi.mock("./tabs/skills-tab", () => ({
   SkillsTab: () => <div>skills-tab</div>,
+}));
+vi.mock("./tabs/learning-tab", () => ({
+  LearningTab: () => <div>learning-tab</div>,
 }));
 vi.mock("./tabs/env-tab", () => ({
   EnvTab: () => <div>env-tab</div>,
@@ -126,44 +119,27 @@ function renderPane(runtimes: AgentRuntime[]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const navigation: NavigationAdapter = {
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
-    pathname: "/acme/agents/agent-1",
-    searchParams: new URLSearchParams(),
-    getShareableUrl: (path) => path,
-  };
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <NavigationProvider value={navigation}>
-        <QueryClientProvider client={queryClient}>
-          <AgentOverviewPane
-            agent={baseAgent}
-            runtime={runtimes[0] ?? null}
-            owner={null}
-            runtimes={runtimes}
-            members={[]}
-            onUpdate={vi.fn().mockResolvedValue(undefined)}
-            canEdit
-          />
-        </QueryClientProvider>
-      </NavigationProvider>
+      <QueryClientProvider client={queryClient}>
+        <AgentOverviewPane
+          agent={baseAgent}
+          runtimes={runtimes}
+          onUpdate={vi.fn().mockResolvedValue(undefined)}
+          canEdit
+        />
+      </QueryClientProvider>
     </I18nProvider>,
   );
-}
-
-function openCapabilities() {
-  fireEvent.click(screen.getByRole("tab", { name: /^Capabilities$/i }));
-}
-
-function openSettings() {
-  fireEvent.click(screen.getByRole("tab", { name: /^Settings$/i }));
 }
 
 beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
   slackListingRef.current = { installations: [], configured: false };
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe("AgentOverviewPane MCP tab visibility", () => {
@@ -178,17 +154,15 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     ["OpenClaw", "openclaw"],
   ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
     renderPane([makeRuntime(provider)]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 
   it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
     // Saving an MCP config on e.g. Gemini would be a silent no-op at run
     // time — that's the bug this hiding logic is meant to prevent.
     renderPane([makeRuntime("gemini")]);
-    openCapabilities();
     expect(
-      screen.queryByRole("tab", { name: /^MCP$/i }),
+      screen.queryByRole("button", { name: /^MCP$/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -197,8 +171,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     // the runtimes query resolving. Hiding the tab would flicker it off and
     // then back on, which reads as a bug.
     renderPane([]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 });
 
@@ -206,9 +179,8 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
   it("shows the Integrations tab once the deployment has Lark configured", async () => {
     larkListingRef.current = { installations: [], configured: true };
     renderPane([makeRuntime("claude")]);
-    openCapabilities();
     expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
+      await screen.findByRole("button", { name: /^Integrations$/i }),
     ).toBeInTheDocument();
   });
 
@@ -217,9 +189,8 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     // a Slack-only deployment was hiding the tab (and its bind entry).
     slackListingRef.current = { installations: [], configured: true };
     renderPane([makeRuntime("claude")]);
-    openCapabilities();
     expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
+      await screen.findByRole("button", { name: /^Integrations$/i }),
     ).toBeInTheDocument();
   });
 
@@ -227,17 +198,8 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     // Default refs are configured:false; the tab must not appear on
     // deployments without either integration, the common case.
     renderPane([makeRuntime("claude")]);
-    openCapabilities();
     expect(
-      screen.queryByRole("tab", { name: /^Integrations$/i }),
+      screen.queryByRole("button", { name: /^Integrations$/i }),
     ).not.toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Settings navigation", () => {
-  it("gives Access its own settings tab", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(screen.getByRole("tab", { name: /^Access$/i })).toBeInTheDocument();
   });
 });

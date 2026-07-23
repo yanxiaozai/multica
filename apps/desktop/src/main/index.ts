@@ -7,6 +7,8 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupSpecMemory } from "./spec-memory";
+import { setupClaudeAgents } from "./claude-agents";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -843,6 +845,8 @@ if (!gotTheLock) {
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
+    setupSpecMemory();
+    setupClaudeAgents();
 
     app.on("activate", () => {
       const window = ensureMainWindow();

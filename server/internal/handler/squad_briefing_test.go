@@ -102,6 +102,20 @@ func TestSquadOperatingProtocolWarnsAgainstDualTrigger(t *testing.T) {
 	}
 }
 
+func TestSquadOperatingProtocolRequiresParallelWorkPackageCheck(t *testing.T) {
+	protocol := squadOperatingProtocolFor(true)
+	compact := strings.Join(strings.Fields(protocol), " ")
+	for _, want := range []string{
+		"one task or several independent work packages",
+		"delegate each parallel lane in this same turn",
+		"Do not parallelize review, design audit, testing, or final acceptance",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, protocol)
+		}
+	}
+}
+
 // seedSquadForBriefing creates a squad with the seeded test agent as
 // leader. Returns the loaded db.Squad and a cleanup-registered ID.
 func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions string) db.Squad {

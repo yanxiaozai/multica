@@ -255,7 +255,9 @@
     "activity": "Activity",
     "tasks": "Tasks",
     "instructions": "Instructions",
+    "spec_profile": "Spec Profile",
     "skills": "Skills",
+    "learning": "Learning",
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
@@ -425,6 +427,29 @@
       "upload_failed_toast": "Avatar upload failed"
     }
   },
+  "import_button": {
+    "label": "Import from Claude Code"
+  },
+  "import_dialog": {
+    "title": "Import from Claude Code",
+    "description": "Import sub-agents from your local ~/.claude/agents/ folder. Each becomes a workspace agent with the same name, description, and instructions.",
+    "list_label": "Agents",
+    "loading": "Reading local agents…",
+    "empty": "No Claude Code agents found in ~/.claude/agents/. Install or run Claude Code first.",
+    "select_all": "Select all",
+    "deselect_all": "Deselect all",
+    "body_chars_one": "{{count}} character",
+    "body_chars_other": "{{count}} characters",
+    "selected_count_one": "{{count}} selected",
+    "selected_count_other": "{{count}} selected",
+    "import_one": "Import {{count}} agent",
+    "import_other": "Import {{count}} agents",
+    "importing": "Importing…",
+    "toast_success_one": "Imported {{count}} agent",
+    "toast_success_other": "Imported {{count}} agents",
+    "toast_partial_failure_one": "{{count}} agent failed to import (may already exist): {{names}}",
+    "toast_partial_failure_other": "{{count}} agents failed to import (may already exist): {{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "Save",
@@ -435,6 +460,15 @@
       "intro": "Set the system prompt used for every task. Markdown is supported.",
       "system_prompt_label": "System prompt",
       "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
+    },
+    "spec_profile": {
+      "intro": "Structured Spec Memory role profile. Use it to declare which durable .spec documents this agent owns; global storage rules stay in the platform prompt.",
+      "placeholder": "{\n  \"primary_outputs\": [\"requirements.md\"],\n  \"contributes\": [\"acceptance.md\"],\n  \"audit_role\": \"requirements-gate\"\n}",
+      "editor_aria": "Spec profile JSON editor",
+      "invalid_json": "Invalid JSON: {{error}}",
+      "invalid_not_object": "Spec profile must be a JSON object.",
+      "saved_toast": "Spec profile saved",
+      "save_failed_toast": "Failed to save spec profile"
     },
     "env": {
       "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",
@@ -627,6 +661,44 @@
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
     },
+    "learning": {
+      "auto_title": "Auto-evolve safe agent learnings",
+      "auto_hint": "When a Learning Report proposes a safe personal-agent improvement, Multica can append it to this agent's instructions automatically. Skill and manual suggestions still need review.",
+      "auto_enabled_toast": "Auto evolution enabled",
+      "auto_disabled_toast": "Auto evolution disabled",
+      "reports_title": "Learning Reports",
+      "reports_hint": "{{count}} pending suggestion(s)",
+      "refresh": "Refresh",
+      "empty_title": "No Learning Reports yet",
+      "empty_hint": "Reports appear after completed issue work records what this agent learned and which instructions or skills could improve.",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "{{count}} suggestion(s)",
+      "no_suggestions": "No suggestions in this report.",
+      "suggestion_fallback": "Evolution suggestion",
+      "apply_agent_action": "Evolve agent",
+      "apply_skill_action": "Update skill",
+      "applied_action": "Applied",
+      "dismissed_action": "Dismissed",
+      "manual_action": "Manual review",
+      "builtin_action": "Candidate",
+      "apply_success_toast": "Evolution applied",
+      "apply_failed_toast": "Failed to apply evolution",
+      "scope": {
+        "personal_agent": "Agent",
+        "workspace_skill": "Skill",
+        "builtin_skill_candidate": "Builtin candidate"
+      },
+      "risk": {
+        "safe": "Safe",
+        "review": "Review",
+        "manual": "Manual"
+      },
+      "status": {
+        "pending": "Pending",
+        "applied": "Applied",
+        "dismissed": "Dismissed"
+      }
+    },
     "integrations": {
       "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
       "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
@@ -667,6 +739,8 @@
       "source_chat": "Chat",
       "source_autopilot": "Autopilot",
       "source_untracked": "Untracked",
+      "source_squad_instructions_generation": "AI draft generation",
+      "source_squad_instructions_generation_short": "AI draft",
       "source_quick_create": "Quick create",
       "source_creating_issue": "Creating issue",
       "source_chat_session": "Chat session",
@@ -683,6 +757,31 @@
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"
+    },
+    "tasks": {
+      "search_placeholder": "Search task runs...",
+      "filter": {
+        "all": "All",
+        "active": "Active",
+        "finished": "Finished"
+      },
+      "empty_title": "No task runs yet",
+      "empty_description": "When this agent runs from an issue, chat, quick create, or automation, the run will appear here.",
+      "no_match_title": "No matching task runs",
+      "no_match_description": "Try a different search or status filter.",
+      "show_more": "Show {{shown}} of {{total}} - load more",
+      "open_issue": "Issue",
+      "created_prefix": "Created {{when}}",
+      "completed_prefix": "Finished {{when}}",
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting for local directory",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "char_counter": {
@@ -754,6 +853,9 @@
     "status_running": "Running",
     "status_completed": "Completed",
     "status_failed": "Failed",
+    "view_label": "Transcript view",
+    "view_events": "Events",
+    "view_raw": "Raw",
     "filter": "Filter",
     "clear_filters": "Clear filters",
     "tool_calls_one": "{{count}} tool call",
@@ -767,6 +869,10 @@
     "waiting_events": "Waiting for events...",
     "antigravity_live_unavailable": "Antigravity does not currently provide live execution events. The transcript will be available after the task completes.",
     "no_data": "No execution data recorded.",
+    "thinking": "Thinking",
+    "tool": "Tool",
+    "tool_result": "{{tool}} result",
+    "changed_files": "Changed files",
     "sort_label": "Sort",
     "sort_chronological": "Oldest first",
     "sort_newest_first": "Newest first",

@@ -4,6 +4,7 @@ import { useTranscriptViewStore } from "./transcript-view-store";
 beforeEach(() => {
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
+    viewMode: "events",
     preserveFilters: false,
     selectedFilterKeys: [],
     defaultExpanded: false,
@@ -11,8 +12,9 @@ beforeEach(() => {
 });
 
 describe("useTranscriptViewStore", () => {
-  it("defaults to chronological, unfiltered, and collapsed", () => {
+  it("defaults to chronological events mode, unfiltered, and collapsed", () => {
     expect(useTranscriptViewStore.getState().sortDirection).toBe("chronological");
+    expect(useTranscriptViewStore.getState().viewMode).toBe("events");
     expect(useTranscriptViewStore.getState().preserveFilters).toBe(false);
     expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual([]);
     expect(useTranscriptViewStore.getState().defaultExpanded).toBe(false);
@@ -61,5 +63,15 @@ describe("useTranscriptViewStore", () => {
 
     setDefaultExpanded(false);
     expect(useTranscriptViewStore.getState().defaultExpanded).toBe(false);
+  });
+
+  it("setViewMode switches between event and raw transcript views", () => {
+    const { setViewMode } = useTranscriptViewStore.getState();
+
+    setViewMode("raw");
+    expect(useTranscriptViewStore.getState().viewMode).toBe("raw");
+
+    setViewMode("events");
+    expect(useTranscriptViewStore.getState().viewMode).toBe("events");
   });
 });

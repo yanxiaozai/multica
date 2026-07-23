@@ -246,7 +246,9 @@
     "activity": "활동",
     "tasks": "작업",
     "instructions": "지침",
+    "spec_profile": "Spec Profile",
     "skills": "스킬",
+    "learning": "학습",
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
@@ -323,6 +325,24 @@
       "upload_failed_toast": "아바타 업로드 실패"
     }
   },
+  "import_button": {
+    "label": "Claude Code에서 가져오기"
+  },
+  "import_dialog": {
+    "title": "Claude Code에서 가져오기",
+    "description": "로컬 ~/.claude/agents/ 폴더에서 하위 에이전트를 가져옵니다. 각 에이전트는 같은 이름의 워크스페이스 에이전트가 되며 설명과 instructions가 유지됩니다.",
+    "list_label": "에이전트",
+    "loading": "로컬 에이전트를 읽는 중…",
+    "empty": "~/.claude/agents/에서 Claude Code 에이전트를 찾을 수 없습니다. 먼저 Claude Code를 설치하거나 실행하세요.",
+    "select_all": "모두 선택",
+    "deselect_all": "선택 해제",
+    "body_chars_other": "{{count}}자",
+    "selected_count_other": "{{count}}개 선택됨",
+    "import_other": "{{count}}개 에이전트 가져오기",
+    "importing": "가져오는 중…",
+    "toast_success_other": "{{count}}개 에이전트를 가져왔습니다",
+    "toast_partial_failure_other": "{{count}}개 에이전트 가져오기에 실패했습니다 (이미 존재할 수 있음): {{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "저장",
@@ -333,6 +353,15 @@
       "intro": "모든 작업에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
       "system_prompt_label": "System Prompt",
       "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다"
+    },
+    "spec_profile": {
+      "intro": "구조화된 Spec Memory 역할 프로필입니다. 이 에이전트가 담당하는 장기 .spec 문서를 선언하세요. 전역 저장 규칙은 플랫폼 prompt에 있습니다.",
+      "placeholder": "{\n  \"primary_outputs\": [\"requirements.md\"],\n  \"contributes\": [\"acceptance.md\"],\n  \"audit_role\": \"requirements-gate\"\n}",
+      "editor_aria": "Spec profile JSON editor",
+      "invalid_json": "잘못된 JSON: {{error}}",
+      "invalid_not_object": "Spec profile은 JSON object여야 합니다.",
+      "saved_toast": "Spec profile을 저장했습니다",
+      "save_failed_toast": "Spec profile을 저장하지 못했습니다"
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",
@@ -523,6 +552,44 @@
       "add_dialog_cancel": "취소",
       "add_failed_toast": "스킬을 추가하지 못했습니다"
     },
+    "learning": {
+      "auto_title": "안전한 에이전트 학습 자동 적용",
+      "auto_hint": "Learning Report가 안전한 개인 에이전트 개선을 제안하면 Multica가 이 에이전트의 지침에 자동으로 추가할 수 있습니다. 스킬 및 수동 검토 제안은 계속 확인이 필요합니다.",
+      "auto_enabled_toast": "자동 진화를 켰습니다",
+      "auto_disabled_toast": "자동 진화를 껐습니다",
+      "reports_title": "Learning Reports",
+      "reports_hint": "대기 중인 제안 {{count}}개",
+      "refresh": "새로고침",
+      "empty_title": "아직 Learning Report가 없습니다",
+      "empty_hint": "완료된 issue 작업에서 이 에이전트가 배운 점과 개선 가능한 지침 또는 스킬이 기록되면 여기에 표시됩니다.",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "제안 {{count}}개",
+      "no_suggestions": "이 리포트에는 제안이 없습니다.",
+      "suggestion_fallback": "진화 제안",
+      "apply_agent_action": "에이전트 진화",
+      "apply_skill_action": "스킬 업데이트",
+      "applied_action": "적용됨",
+      "dismissed_action": "무시됨",
+      "manual_action": "수동 검토",
+      "builtin_action": "후보",
+      "apply_success_toast": "진화를 적용했습니다",
+      "apply_failed_toast": "진화를 적용하지 못했습니다",
+      "scope": {
+        "personal_agent": "에이전트",
+        "workspace_skill": "스킬",
+        "builtin_skill_candidate": "내장 후보"
+      },
+      "risk": {
+        "safe": "안전",
+        "review": "검토",
+        "manual": "수동"
+      },
+      "status": {
+        "pending": "대기 중",
+        "applied": "적용됨",
+        "dismissed": "무시됨"
+      }
+    },
     "integrations": {
       "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",
       "members_note": "에이전트를 외부 채팅 플랫폼에 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
@@ -561,6 +628,8 @@
       "source_chat": "채팅",
       "source_autopilot": "오토파일럿",
       "source_untracked": "추적 안 됨",
+      "source_squad_instructions_generation": "AI 초안 생성",
+      "source_squad_instructions_generation_short": "AI 초안",
       "source_quick_create": "빠른 생성",
       "source_creating_issue": "이슈 생성 중",
       "source_chat_session": "채팅 세션",
@@ -577,6 +646,31 @@
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
       "queued_prefix": "{{when}} 대기 시작"
+    },
+    "tasks": {
+      "search_placeholder": "작업 실행 검색...",
+      "filter": {
+        "all": "전체",
+        "active": "활성",
+        "finished": "완료"
+      },
+      "empty_title": "아직 작업 실행이 없습니다",
+      "empty_description": "이 에이전트가 이슈, 채팅, 빠른 생성 또는 자동화에서 실행되면 여기에 표시됩니다.",
+      "no_match_title": "일치하는 작업 실행이 없습니다",
+      "no_match_description": "다른 검색어나 상태 필터를 시도해 보세요.",
+      "show_more": "{{total}}개 중 {{shown}}개 표시 - 더 불러오기",
+      "open_issue": "이슈",
+      "created_prefix": "{{when}} 생성됨",
+      "completed_prefix": "{{when}} 완료됨",
+      "status": {
+        "queued": "대기 중",
+        "dispatched": "디스패치됨",
+        "waiting_local_directory": "로컬 디렉터리 대기 중",
+        "running": "실행 중",
+        "completed": "완료됨",
+        "failed": "실패함",
+        "cancelled": "취소됨"
+      }
     }
   },
   "char_counter": {
@@ -648,6 +742,9 @@
     "status_running": "실행 중",
     "status_completed": "완료됨",
     "status_failed": "실패함",
+    "view_label": "트랜스크립트 보기 방식",
+    "view_events": "이벤트",
+    "view_raw": "원문",
     "filter": "필터",
     "clear_filters": "필터 지우기",
     "tool_calls_other": "도구 호출 {{count}}회",
@@ -659,6 +756,10 @@
     "waiting_events": "이벤트를 기다리는 중...",
     "antigravity_live_unavailable": "Antigravity는 현재 실시간 실행 이벤트를 제공하지 않습니다. 작업이 완료되면 실행 기록을 확인할 수 있습니다.",
     "no_data": "기록된 실행 데이터가 없습니다.",
+    "thinking": "생각",
+    "tool": "도구",
+    "tool_result": "{{tool}} 결과",
+    "changed_files": "변경된 파일",
     "sort_label": "정렬",
     "sort_chronological": "오래된 순",
     "sort_newest_first": "최신 순",

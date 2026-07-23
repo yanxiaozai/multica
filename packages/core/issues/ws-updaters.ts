@@ -102,6 +102,14 @@ export function onIssueCreated(
   }
 }
 
+export function onIssueCreatedFallback(
+  qc: QueryClient,
+  wsId: string,
+) {
+  qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+  qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+}
+
 export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,

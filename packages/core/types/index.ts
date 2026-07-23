@@ -1,5 +1,17 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
 export type {
+  AppendIssueDraftMessageRequest,
+  CreateIssueDraftRequest,
+  IssueDraftArtifact,
+  IssueDraftBundle,
+  IssueDraftConfirmStep,
+  IssueDraftMemberTask,
+  IssueDraftMessage,
+  IssueDraftSession,
+  IssueDraftStatus,
+  ListIssueDraftSessionsResponse,
+} from "./issue-draft";
+export type {
   Agent,
   AgentStatus,
   AgentRuntimeMode,
@@ -41,6 +53,15 @@ export type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  AgentLearningReport,
+  AgentEvolutionSuggestion,
+  AgentEvolutionApplication,
+  AgentEvolutionScope,
+  AgentEvolutionRisk,
+  AgentEvolutionSuggestionStatus,
+  AgentEvolutionTargetType,
+  CreateAgentLearningReportRequest,
+  CreateAgentEvolutionSuggestionRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
@@ -129,6 +150,7 @@ export type {
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
 } from "./github";
+export type * from "./spec-memory";
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
@@ -184,6 +206,11 @@ export type {
   SquadActivityOutcome,
   CreateSquadRequest,
   UpdateSquadRequest,
+  GenerateSquadInstructionsRequest,
+  GenerateSquadInstructionsResponse,
+  SquadInstructionsGenerationStatus,
+  CreateSquadInstructionsGenerationRequest,
+  SquadInstructionsGenerationJob,
   AddSquadMemberRequest,
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
@@ -193,6 +220,26 @@ export type {
   SquadMemberStatus,
   SquadMemberStatusListResponse,
 } from "./squad";
+export type {
+  SpecDecision,
+  SpecDocument,
+  SpecEpic,
+  SpecIssueContext,
+  SpecIssueMapping,
+  SpecIssueState,
+  SpecModule,
+  ListSpecDocumentsResponse,
+  ListSpecEpicsResponse,
+  ListSpecModulesResponse,
+  UpdateIssueSpecMappingRequest,
+  UpdateIssueSpecMappingResponse,
+  UpdateIssueSpecStateRequest,
+  UpdateIssueSpecStateResponse,
+  UpdateSpecDocumentRequest,
+  UpdateSpecDocumentResponse,
+  CreateSpecDecisionRequest,
+  CreateSpecDecisionResponse,
+} from "./spec-memory";
 export type {
   BillingBalance,
   BillingTransaction,

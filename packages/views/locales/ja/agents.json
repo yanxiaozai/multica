@@ -238,7 +238,9 @@
     "activity": "アクティビティ",
     "tasks": "タスク",
     "instructions": "指示",
+    "spec_profile": "Spec Profile",
     "skills": "スキル",
+    "learning": "学習",
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
@@ -315,6 +317,24 @@
       "upload_failed_toast": "アバターのアップロードに失敗しました"
     }
   },
+  "import_button": {
+    "label": "Claude Code からインポート"
+  },
+  "import_dialog": {
+    "title": "Claude Code からインポート",
+    "description": "ローカルの ~/.claude/agents/ からサブエージェントをインポートします。各エージェントは同名のワークスペースエージェントになり、説明と instructions が引き継がれます。",
+    "list_label": "エージェント",
+    "loading": "ローカルのエージェントを読み込み中…",
+    "empty": "~/.claude/agents/ に Claude Code エージェントが見つかりません。先に Claude Code をインストールまたは実行してください。",
+    "select_all": "すべて選択",
+    "deselect_all": "選択解除",
+    "body_chars_other": "{{count}} 文字",
+    "selected_count_other": "{{count}} 件選択中",
+    "import_other": "{{count}} 件のエージェントをインポート",
+    "importing": "インポート中…",
+    "toast_success_other": "{{count}} 件のエージェントをインポートしました",
+    "toast_partial_failure_other": "{{count}} 件のインポートに失敗しました（既に存在する可能性があります）：{{names}}"
+  },
   "tab_body": {
     "common": {
       "save": "保存",
@@ -325,6 +345,15 @@
       "intro": "すべてのタスクで使用する System Prompt を設定します。Markdown に対応しています。",
       "system_prompt_label": "System Prompt",
       "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う"
+    },
+    "spec_profile": {
+      "intro": "構造化された Spec Memory の役割プロフィールです。このエージェントが担当する長期 .spec ドキュメントを宣言します。全体の保存ルールはプラットフォーム prompt 側にあります。",
+      "placeholder": "{\n  \"primary_outputs\": [\"requirements.md\"],\n  \"contributes\": [\"acceptance.md\"],\n  \"audit_role\": \"requirements-gate\"\n}",
+      "editor_aria": "Spec profile JSON editor",
+      "invalid_json": "無効な JSON: {{error}}",
+      "invalid_not_object": "Spec profile は JSON object である必要があります。",
+      "saved_toast": "Spec profile を保存しました",
+      "save_failed_toast": "Spec profile を保存できませんでした"
     },
     "env": {
       "intro_readonly": "エージェントプロセスの起動時に注入されます。値の読み取りや編集ができるのはワークスペースのオーナーと admin のみで、すべての表示と編集はワークスペースの監査ログに記録されます。",
@@ -515,6 +544,44 @@
       "add_dialog_cancel": "キャンセル",
       "add_failed_toast": "スキルを追加できませんでした"
     },
+    "learning": {
+      "auto_title": "安全なエージェント学習を自動適用",
+      "auto_hint": "Learning Report が安全な個別エージェント改善を提案した場合、Multica はこのエージェントの指示へ自動で追加できます。スキルと手動レビューの提案は引き続き確認が必要です。",
+      "auto_enabled_toast": "自動進化を有効にしました",
+      "auto_disabled_toast": "自動進化を無効にしました",
+      "reports_title": "Learning Reports",
+      "reports_hint": "保留中の提案 {{count}} 件",
+      "refresh": "更新",
+      "empty_title": "Learning Report はまだありません",
+      "empty_hint": "完了した issue 作業から、このエージェントが学んだことや改善できる指示・スキルが記録されると、ここに表示されます。",
+      "report_fallback": "Learning Report",
+      "suggestion_count": "提案 {{count}} 件",
+      "no_suggestions": "このレポートには提案がありません。",
+      "suggestion_fallback": "進化提案",
+      "apply_agent_action": "エージェントを進化",
+      "apply_skill_action": "スキルを更新",
+      "applied_action": "適用済み",
+      "dismissed_action": "却下済み",
+      "manual_action": "手動レビュー",
+      "builtin_action": "候補",
+      "apply_success_toast": "進化を適用しました",
+      "apply_failed_toast": "進化を適用できませんでした",
+      "scope": {
+        "personal_agent": "エージェント",
+        "workspace_skill": "スキル",
+        "builtin_skill_candidate": "組み込み候補"
+      },
+      "risk": {
+        "safe": "安全",
+        "review": "レビュー",
+        "manual": "手動"
+      },
+      "status": {
+        "pending": "保留中",
+        "applied": "適用済み",
+        "dismissed": "却下済み"
+      }
+    },
     "integrations": {
       "intro": "このエージェントを外部のチャットプラットフォームに接続し、普段使っているツールから直接やり取りできるようにします。",
       "members_note": "エージェントを外部チャットプラットフォームに接続できるのはワークスペースのオーナーと管理者のみです。接続済みの Bot は「設定 → 連携」で確認できます。"
@@ -553,6 +620,8 @@
       "source_chat": "チャット",
       "source_autopilot": "オートパイロット",
       "source_untracked": "未追跡",
+      "source_squad_instructions_generation": "AI下書き生成",
+      "source_squad_instructions_generation_short": "AI下書き",
       "source_quick_create": "クイック作成",
       "source_creating_issue": "イシューを作成中",
       "source_chat_session": "チャットセッション",
@@ -569,6 +638,31 @@
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始"
+    },
+    "tasks": {
+      "search_placeholder": "タスク実行を検索...",
+      "filter": {
+        "all": "すべて",
+        "active": "アクティブ",
+        "finished": "完了"
+      },
+      "empty_title": "タスク実行はまだありません",
+      "empty_description": "このエージェントがイシュー、チャット、クイック作成、または自動化から実行されると、ここに表示されます。",
+      "no_match_title": "一致するタスク実行がありません",
+      "no_match_description": "別の検索語またはステータスフィルターを試してください。",
+      "show_more": "{{total}} 件中 {{shown}} 件を表示 - さらに読み込む",
+      "open_issue": "イシュー",
+      "created_prefix": "{{when}} に作成",
+      "completed_prefix": "{{when}} に完了",
+      "status": {
+        "queued": "待機中",
+        "dispatched": "ディスパッチ済み",
+        "waiting_local_directory": "ローカルディレクトリ待ち",
+        "running": "実行中",
+        "completed": "完了",
+        "failed": "失敗",
+        "cancelled": "キャンセル済み"
+      }
     }
   },
   "char_counter": {
@@ -640,6 +734,9 @@
     "status_running": "実行中",
     "status_completed": "完了",
     "status_failed": "失敗",
+    "view_label": "トランスクリプト表示",
+    "view_events": "イベント",
+    "view_raw": "原文",
     "filter": "フィルター",
     "clear_filters": "フィルターをクリア",
     "tool_calls_other": "ツール呼び出し {{count}} 回",
@@ -651,6 +748,10 @@
     "waiting_events": "イベントを待機中...",
     "antigravity_live_unavailable": "Antigravity は現在、リアルタイム実行イベントを提供していません。タスク完了後に実行記録を確認できます。",
     "no_data": "記録された実行データがありません。",
+    "thinking": "思考",
+    "tool": "ツール",
+    "tool_result": "{{tool}} の結果",
+    "changed_files": "変更されたファイル",
     "sort_label": "並び替え",
     "sort_chronological": "古い順",
     "sort_newest_first": "新しい順",

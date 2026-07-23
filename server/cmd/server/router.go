@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/issuebridge"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -608,6 +609,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
 	}
 
+	var issueBridgeBox issuebridge.SecretBox
+	if issueBridgeKey, err := secretbox.LoadKey("MULTICA_ISSUE_BRIDGE_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(issueBridgeKey)
+		if err != nil {
+			slog.Error("issue bridge: secretbox.New failed; token operations disabled", "error", err)
+		} else {
+			issueBridgeBox = box
+			slog.Info("issue bridge token storage enabled")
+		}
+	} else {
+		slog.Info("issue bridge token storage disabled (MULTICA_ISSUE_BRIDGE_SECRET_KEY not set)")
+	}
+	h.IssueBridgeService = issuebridge.NewService(queries, issueBridgeBox)
+	// Wire issue creation into the bridge so ImportProjectIssues can mint
+	// local issues with proper numbering / WS events / on-assign enqueue.
+	// IssueService is constructed earlier in this composition root.
+	if h.IssueService != nil {
+		h.IssueBridgeService.SetIssueService(h.IssueService)
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -1032,6 +1053,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			r.Get("/api/issue-integrations", h.ListIssueIntegrations)
+			r.Get("/api/issue-sync-configs", h.ListIssueSyncConfigs)
+
+			r.Group(func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+
+				r.Post("/api/issue-integrations/gitlab", h.CreateGitLabIssueIntegration)
+				r.Put("/api/issue-integrations/{id}", h.UpdateIssueIntegration)
+				r.Delete("/api/issue-integrations/{id}", h.DeleteIssueIntegration)
+				r.Post("/api/issue-integrations/{id}/test", h.TestIssueIntegration)
+				r.Post("/api/issue-sync-configs", h.CreateIssueSyncConfig)
+				r.Put("/api/issue-sync-configs/{id}", h.UpdateIssueSyncConfig)
+				r.Delete("/api/issue-sync-configs/{id}", h.DeleteIssueSyncConfig)
+			})
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
@@ -1075,7 +1112,27 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
+					r.Get("/spec", h.GetIssueSpec)
+					r.Put("/spec/mapping", h.UpdateIssueSpecMapping)
+					r.Put("/spec/state", h.UpdateIssueSpecState)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/learning-reports", h.ListIssueLearningReports)
+					r.Post("/learning-report", h.GenerateIssueLearningReport)
+				})
+			})
+
+			// Issue draft sessions
+			r.Route("/api/issue-drafts", func(r chi.Router) {
+				r.Get("/", h.ListIssueDrafts)
+				r.Post("/", h.CreateIssueDraft)
+				r.Get("/active", h.GetActiveIssueDraft)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueDraft)
+					r.Post("/messages", h.AppendIssueDraftMessage)
+					r.Post("/delegate", h.DelegateIssueDraft)
+					r.Post("/generate", h.GenerateIssueDraft)
+					r.Post("/confirm", h.ConfirmIssueDraft)
+					r.Post("/cancel", h.CancelIssueDraft)
 				})
 			})
 
@@ -1116,7 +1173,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					// One-shot import of GitLab issues assigned to the
+					// connection owner into this project.
+					r.Post("/gitlab/import-issues", h.ImportProjectGitLabIssues)
 				})
+			})
+
+			// Spec Memory
+			r.Route("/api/spec", func(r chi.Router) {
+				r.Post("/sync/from-files", h.SyncSpecFromFiles)
+				r.Get("/sync/to-files", h.SyncSpecToFiles)
+				r.Get("/epics", h.ListSpecEpics)
+				r.Get("/epics/{epicId}/documents", h.ListSpecEpicDocuments)
+				r.Get("/epics/{epicId}/modules", h.ListSpecModules)
+				r.Get("/modules/{moduleId}/documents", h.ListSpecModuleDocuments)
+				r.Put("/modules/{moduleId}/documents/{docKind}", h.UpdateSpecModuleDocument)
+				r.Post("/decisions", h.CreateSpecDecision)
 			})
 
 			// Squads
@@ -1125,6 +1197,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateSquad)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSquad)
+					r.Post("/instructions/generate", h.GenerateSquadInstructions)
+					r.Post("/instructions/generation-jobs", h.CreateSquadInstructionsGenerationJob)
+					r.Get("/instructions/generation-jobs/{jobId}", h.GetSquadInstructionsGenerationJob)
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)
@@ -1209,6 +1284,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
+					r.Get("/learning-reports", h.ListAgentLearningReports)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
 					r.Post("/skills/add", h.AddAgentSkills)
@@ -1225,6 +1301,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
 				})
+			})
+
+			// Agent learning / evolution
+			r.Route("/api/agent-learning-reports", func(r chi.Router) {
+				r.Post("/", h.CreateAgentLearningReport)
+				r.Get("/{id}", h.GetAgentLearningReport)
+			})
+			r.Route("/api/agent-evolution-suggestions", func(r chi.Router) {
+				r.Post("/{id}/apply", h.ApplyAgentEvolutionSuggestion)
 			})
 
 			// Agent templates catalog (browse + detail). The Create flow

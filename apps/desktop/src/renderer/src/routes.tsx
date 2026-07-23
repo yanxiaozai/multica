@@ -1,5 +1,10 @@
 import { useEffect } from "react";
-import { createMemoryRouter, Outlet, useMatches } from "react-router-dom";
+import {
+  createMemoryRouter,
+  Outlet,
+  useMatches,
+  useParams,
+} from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
@@ -14,6 +19,7 @@ import {
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
+import { SpecMemoryPage } from "@multica/views/spec-memory";
 import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
@@ -57,6 +63,11 @@ function DesktopSettingsRoute() {
       ]}
     />
   );
+}
+
+function DesktopSpecMemoryRoute() {
+  const { id = "" } = useParams();
+  return <SpecMemoryPage projectId={id} />;
 }
 
 /**
@@ -141,6 +152,11 @@ export const appRoutes: RouteObject[] = [
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
+          },
+          {
+            path: "projects/:id/spec-memory",
+            element: <DesktopSpecMemoryRoute />,
+            handle: { title: "Spec Memory" },
           },
           {
             path: "autopilots",

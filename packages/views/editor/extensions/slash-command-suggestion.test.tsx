@@ -1,6 +1,8 @@
-import { render } from "@testing-library/react";
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
@@ -22,6 +24,8 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
+
+afterEach(cleanup);
 
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
+import "@testing-library/jest-dom/vitest";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -98,6 +100,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.clearAllMocks();
 });
 

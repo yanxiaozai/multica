@@ -21,6 +21,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/internal/service/issuedraft"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -1267,6 +1268,39 @@ type QuickCreateContext struct {
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
 
+// SquadInstructionsGenerationContextType marks an internal task that asks an
+// agent runtime to summarize squad member agent documents into
+// squad.instructions markdown. It intentionally has no issue or chat link; the
+// result is copied into squad_instructions_generation_job on completion.
+const SquadInstructionsGenerationContextType = "squad_instructions_generation"
+
+type SquadInstructionsGenerationContext struct {
+	Type            string `json:"type"`
+	WorkspaceID     string `json:"workspace_id"`
+	SquadID         string `json:"squad_id"`
+	GenerationJobID string `json:"generation_job_id"`
+	Prompt          string `json:"prompt"`
+}
+
+// IssueDraftContextType marks a read-only task that contributes to an issue
+// draft session before the user confirms issue creation. These tasks must not
+// write code or mutate git state; they gather requirements, inspect code when
+// relevant, and report findings back to the draft session.
+const IssueDraftContextType = "issue_draft"
+
+type IssueDraftContext struct {
+	Type             string `json:"type"`
+	WorkspaceID      string `json:"workspace_id"`
+	SessionID        string `json:"session_id"`
+	ProjectID        string `json:"project_id"`
+	SquadID          string `json:"squad_id"`
+	MemberTaskID     string `json:"member_task_id,omitempty"`
+	Role             string `json:"role"`
+	Prompt           string `json:"prompt"`
+	PrimaryLocalPath string `json:"primary_local_path,omitempty"`
+	ReadOnly         bool   `json:"read_only"`
+}
+
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
 // task's context JSONB and the agent is expected to translate it into a
@@ -1376,6 +1410,83 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+func (s *TaskService) EnqueueIssueDraftTask(ctx context.Context, agent db.Agent, payload IssueDraftContext) (db.AgentTaskQueue, error) {
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	payload.Type = IssueDraftContextType
+	payload.ReadOnly = true
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal issue draft context: %w", err)
+	}
+	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agent.ID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create issue draft task: %w", err)
+	}
+	slog.Info("issue draft task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(agent.ID),
+		"workspace_id", payload.WorkspaceID,
+		"session_id", payload.SessionID,
+		"member_task_id", payload.MemberTaskID,
+		"role", payload.Role,
+	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+func (s *TaskService) EnqueueSquadInstructionsGenerationTask(ctx context.Context, agent db.Agent, job db.SquadInstructionsGenerationJob, prompt string) (db.AgentTaskQueue, error) {
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := SquadInstructionsGenerationContext{
+		Type:            SquadInstructionsGenerationContextType,
+		WorkspaceID:     util.UUIDToString(job.WorkspaceID),
+		SquadID:         util.UUIDToString(job.SquadID),
+		GenerationJobID: util.UUIDToString(job.ID),
+		Prompt:          prompt,
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal squad instructions generation context: %w", err)
+	}
+
+	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agent.ID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create squad instructions generation task: %w", err)
+	}
+
+	slog.Info("squad instructions generation task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(agent.ID),
+		"squad_id", payload.SquadID,
+		"workspace_id", payload.WorkspaceID,
+		"generation_job_id", payload.GenerationJobID,
+	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
@@ -2049,6 +2160,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
 	s.captureTaskDispatched(ctx, *claimed)
+	s.markSquadInstructionsGenerationRunning(ctx, *claimed)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
 	// working write racing after a just-cancelled claim.
@@ -2121,6 +2233,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			"runtime_id", runtimeKey,
 			"agent_id", util.UUIDToString(stale.AgentID),
 		)
+		s.markSquadInstructionsGenerationRunning(ctx, stale)
 		return &stale, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -2472,8 +2585,10 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 	)
 }
 
-// StartTask transitions a dispatched task to running.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// StartTask transitions a dispatched task to running and promotes its issue
+// from todo to in_progress. The conditional issue update is a server-side
+// safety net for automatic agent pickup; agents may still manage later status
+// transitions explicitly through the CLI.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.StartAgentTask(ctx, taskID)
 	if err != nil {
@@ -2483,6 +2598,9 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
+	s.markSquadInstructionsGenerationRunning(ctx, task)
+	s.markIssueDraftMemberTaskRunning(ctx, task)
+	s.promoteIssueTodoToInProgress(ctx, task)
 	// Tell every connected workspace WS client that this task transitioned
 	// (dispatched | waiting_local_directory) → running. Without this, the
 	// workspace-wide `agentTaskSnapshot` query only refreshes on the 30s
@@ -2491,6 +2609,44 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	// on the transition users care about most.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
 	return &task, nil
+}
+
+func (s *TaskService) promoteIssueTodoToInProgress(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("start task: load issue for status promotion failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	if issue.Status != "todo" {
+		return
+	}
+
+	updatedIssue, err := s.Queries.UpdateIssueStatusIfCurrent(ctx, db.UpdateIssueStatusIfCurrentParams{
+		ID:            issue.ID,
+		NextStatus:    "in_progress",
+		WorkspaceID:   issue.WorkspaceID,
+		CurrentStatus: "todo",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("start task: promote issue to in_progress failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	s.broadcastIssueUpdated(updatedIssue, issue.Status)
 }
 
 func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, taskID pgtype.UUID) {
@@ -2663,6 +2819,20 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+
+	if draft, ok := s.parseIssueDraftContext(task); ok {
+		s.completeIssueDraftMemberTask(ctx, task, draft, result)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+		return &task, nil
+	}
+
+	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
+		s.completeSquadInstructionsGenerationTask(ctx, task, gen, result)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+		return &task, nil
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -3040,6 +3210,20 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
 
+	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
+		s.failSquadInstructionsGenerationTask(ctx, task, gen, errMsg)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+		return &task, nil
+	}
+
+	if draft, ok := s.parseIssueDraftContext(task); ok {
+		s.failIssueDraftMemberTask(ctx, task, draft, errMsg)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+		return &task, nil
+	}
+
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
 	// queued first, then notify the daemon — see EnqueueTaskForIssue for the
@@ -3099,6 +3283,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
 		}
 	}
+
+	if retried == nil && task.IssueID.Valid {
+		s.promoteBlockedIssueToReview(ctx, task, failureReason)
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -3219,6 +3408,66 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
+}
+
+// promoteBlockedIssueToReview moves a delivered-but-blocked issue to review.
+// Agent prompts intentionally forbid squad leaders from setting in_review
+// themselves, so the server owns this narrow status handoff when a task ends
+// with the explicit agent_blocked reason and no other active task remains.
+func (s *TaskService) promoteBlockedIssueToReview(ctx context.Context, task db.AgentTaskQueue, failureReason string) bool {
+	if !task.IssueID.Valid || failureReason != taskfailure.ReasonAgentBlocked.String() {
+		return false
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("promote blocked issue: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return false
+	}
+	return s.promoteBlockedIssueToReviewForIssue(ctx, task, issue, failureReason)
+}
+
+func (s *TaskService) promoteBlockedIssueToReviewForIssue(ctx context.Context, task db.AgentTaskQueue, issue db.Issue, failureReason string) bool {
+	if !task.IssueID.Valid || failureReason != taskfailure.ReasonAgentBlocked.String() || issue.Status != "in_progress" {
+		return false
+	}
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("promote blocked issue: active check failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return false
+	}
+	if hasActive {
+		return false
+	}
+	updatedIssue, err := s.Queries.UpdateIssueStatusIfCurrent(ctx, db.UpdateIssueStatusIfCurrentParams{
+		ID:            task.IssueID,
+		WorkspaceID:   issue.WorkspaceID,
+		CurrentStatus: "in_progress",
+		NextStatus:    "in_review",
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("promote blocked issue: status update failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"error", err,
+			)
+		}
+		return false
+	}
+	slog.Info("promoted blocked issue to review",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(task.IssueID),
+	)
+	s.broadcastIssueUpdated(updatedIssue, issue.Status)
+	return true
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -3600,6 +3849,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				issueKey := util.UUIDToString(t.IssueID)
 				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
+					if failureReason == taskfailure.ReasonAgentBlocked.String() {
+						s.promoteBlockedIssueToReviewForIssue(ctx, t, issue, failureReason)
+						continue
+					}
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
 						slog.Warn("handle failed tasks: active check failed",
@@ -4045,6 +4298,12 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID
 	}
+	if gen, ok := s.parseSquadInstructionsGenerationContext(task); ok {
+		return gen.WorkspaceID
+	}
+	if draft, ok := s.parseIssueDraftContext(task); ok {
+		return draft.WorkspaceID
+	}
 	return ""
 }
 
@@ -4256,6 +4515,301 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+func (s *TaskService) parseSquadInstructionsGenerationContext(task db.AgentTaskQueue) (SquadInstructionsGenerationContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	var gen SquadInstructionsGenerationContext
+	if err := json.Unmarshal(task.Context, &gen); err != nil {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	if gen.Type != SquadInstructionsGenerationContextType || gen.GenerationJobID == "" {
+		return SquadInstructionsGenerationContext{}, false
+	}
+	return gen, true
+}
+
+func (s *TaskService) parseIssueDraftContext(task db.AgentTaskQueue) (IssueDraftContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return IssueDraftContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return IssueDraftContext{}, false
+	}
+	var draft IssueDraftContext
+	if err := json.Unmarshal(task.Context, &draft); err != nil {
+		return IssueDraftContext{}, false
+	}
+	if draft.Type != IssueDraftContextType || draft.SessionID == "" {
+		return IssueDraftContext{}, false
+	}
+	return draft, true
+}
+
+func issueDraftContextIDs(task db.AgentTaskQueue, draft IssueDraftContext) (sessionID, workspaceID, memberTaskID pgtype.UUID, ok bool) {
+	sessionID, err := util.ParseUUID(draft.SessionID)
+	if err != nil {
+		slog.Warn("invalid issue draft session id",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	workspaceID, err = util.ParseUUID(draft.WorkspaceID)
+	if err != nil {
+		slog.Warn("invalid issue draft workspace id",
+			"task_id", util.UUIDToString(task.ID),
+			"workspace_id", draft.WorkspaceID,
+			"error", err,
+		)
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	memberTaskID, err = util.ParseUUID(draft.MemberTaskID)
+	if err != nil {
+		slog.Warn("invalid issue draft member task id",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	return sessionID, workspaceID, memberTaskID, true
+}
+
+func issueDraftTaskMetadata(task db.AgentTaskQueue) []byte {
+	metadata, err := json.Marshal(map[string]string{
+		"task_id":  util.UUIDToString(task.ID),
+		"agent_id": util.UUIDToString(task.AgentID),
+	})
+	if err != nil {
+		return nil
+	}
+	return metadata
+}
+
+func (s *TaskService) markIssueDraftMemberTaskRunning(ctx context.Context, task db.AgentTaskQueue) {
+	draft, ok := s.parseIssueDraftContext(task)
+	if !ok {
+		return
+	}
+	_, workspaceID, memberTaskID, ok := issueDraftContextIDs(task, draft)
+	if !ok {
+		return
+	}
+	if _, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+		ID:          memberTaskID,
+		WorkspaceID: workspaceID,
+		Status:      "running",
+		Findings:    "",
+		Error:       "",
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft member task running",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) completeIssueDraftMemberTask(ctx context.Context, task db.AgentTaskQueue, draft IssueDraftContext, result []byte) {
+	sessionID, workspaceID, memberTaskID, ok := issueDraftContextIDs(task, draft)
+	if !ok {
+		return
+	}
+	body := taskCompletedOutput(result)
+	if body == "" {
+		body = "澄清任务已完成，但没有返回可展示内容。"
+	}
+	if _, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+		ID:          memberTaskID,
+		WorkspaceID: workspaceID,
+		Status:      "completed",
+		Findings:    body,
+		Error:       "",
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to complete issue draft member task",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.AppendIssueDraftMessage(ctx, db.AppendIssueDraftMessageParams{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
+		AuthorType:  issuedraft.AuthorAgent,
+		AuthorID:    task.AgentID,
+		MessageType: issuedraft.MessageFinding,
+		Content:     body,
+		Metadata:    issueDraftTaskMetadata(task),
+	}); err != nil {
+		slog.Warn("failed to append issue draft finding",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+		Status:      issuedraft.StatusClarifying,
+		LastError:   "",
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft session clarified",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) failIssueDraftMemberTask(ctx context.Context, task db.AgentTaskQueue, draft IssueDraftContext, errMsg string) {
+	sessionID, workspaceID, memberTaskID, ok := issueDraftContextIDs(task, draft)
+	if !ok {
+		return
+	}
+	errMsg = strings.TrimSpace(errMsg)
+	if errMsg == "" {
+		errMsg = "澄清任务失败，但没有返回错误详情。"
+	}
+	if _, err := s.Queries.UpdateIssueDraftMemberTaskStatus(ctx, db.UpdateIssueDraftMemberTaskStatusParams{
+		ID:          memberTaskID,
+		WorkspaceID: workspaceID,
+		Status:      "failed",
+		Findings:    "",
+		Error:       errMsg,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft member task failed",
+			"task_id", util.UUIDToString(task.ID),
+			"member_task_id", draft.MemberTaskID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.AppendIssueDraftMessage(ctx, db.AppendIssueDraftMessageParams{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
+		AuthorType:  issuedraft.AuthorAgent,
+		AuthorID:    task.AgentID,
+		MessageType: issuedraft.MessageError,
+		Content:     errMsg,
+		Metadata:    issueDraftTaskMetadata(task),
+	}); err != nil {
+		slog.Warn("failed to append issue draft task error",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+	if _, err := s.Queries.UpdateIssueDraftSessionStatus(ctx, db.UpdateIssueDraftSessionStatusParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+		Status:      issuedraft.StatusClarifying,
+		LastError:   errMsg,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark issue draft session after task failure",
+			"task_id", util.UUIDToString(task.ID),
+			"session_id", draft.SessionID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) markSquadInstructionsGenerationRunning(ctx context.Context, task db.AgentTaskQueue) {
+	gen, ok := s.parseSquadInstructionsGenerationContext(task)
+	if !ok {
+		return
+	}
+	jobID, err := util.ParseUUID(gen.GenerationJobID)
+	if err != nil {
+		slog.Warn("invalid squad instructions generation job id",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+		return
+	}
+	if _, err := s.Queries.MarkSquadInstructionsGenerationRunning(ctx, jobID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to mark squad instructions generation running",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+	}
+}
+
+func taskCompletedOutput(result []byte) string {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+}
+
+func (s *TaskService) completeSquadInstructionsGenerationTask(ctx context.Context, task db.AgentTaskQueue, gen SquadInstructionsGenerationContext, result []byte) {
+	jobID, err := util.ParseUUID(gen.GenerationJobID)
+	if err != nil {
+		slog.Warn("invalid squad instructions generation job id",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+		return
+	}
+	body := taskCompletedOutput(result)
+	if body == "" {
+		if _, err := s.Queries.FailSquadInstructionsGenerationJob(ctx, db.FailSquadInstructionsGenerationJobParams{
+			ID:    jobID,
+			Error: pgtype.Text{String: "AI generation completed without output", Valid: true},
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("failed to mark empty squad instructions generation failed",
+				"task_id", util.UUIDToString(task.ID),
+				"generation_job_id", gen.GenerationJobID,
+				"error", err,
+			)
+		}
+		return
+	}
+	if _, err := s.Queries.CompleteSquadInstructionsGenerationJob(ctx, db.CompleteSquadInstructionsGenerationJobParams{
+		ID:           jobID,
+		Instructions: body,
+	}); err != nil {
+		slog.Warn("failed to complete squad instructions generation job",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+	}
+}
+
+func (s *TaskService) failSquadInstructionsGenerationTask(ctx context.Context, task db.AgentTaskQueue, gen SquadInstructionsGenerationContext, errMsg string) {
+	jobID, err := util.ParseUUID(gen.GenerationJobID)
+	if err != nil {
+		slog.Warn("invalid squad instructions generation job id",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+		return
+	}
+	errMsg = strings.TrimSpace(errMsg)
+	if errMsg == "" {
+		errMsg = "AI generation task failed"
+	}
+	if _, err := s.Queries.FailSquadInstructionsGenerationJob(ctx, db.FailSquadInstructionsGenerationJobParams{
+		ID:    jobID,
+		Error: pgtype.Text{String: errMsg, Valid: true},
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("failed to fail squad instructions generation job",
+			"task_id", util.UUIDToString(task.ID),
+			"generation_job_id", gen.GenerationJobID,
+			"error", err,
+		)
+	}
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

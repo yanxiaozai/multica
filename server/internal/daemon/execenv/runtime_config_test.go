@@ -203,6 +203,59 @@ func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
 	}
 }
 
+func TestCommentTriggeredWorkflowRequiresCommentScopedSpecCheckpoint(t *testing.T) {
+	t.Parallel()
+	const (
+		issueID   = "55555555-6666-7777-8888-999999999999"
+		commentID = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+	)
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: commentID,
+	})
+
+	for _, want := range []string{
+		"Read Spec Memory for this issue",
+		"multica spec status --issue " + issueID + " --output json",
+		"multica spec workflow list " + issueID + " --output json",
+		"multica spec read --issue " + issueID + " --doc issue",
+		"classify the triggering comment intent",
+		"`new_request`, `resume`, `constraint`, `question`, or `no_action`",
+		"Latest comment intent wins",
+		"Only `resume` continues an interrupted checkpoint",
+		"`new_request` starts a new workflow anchored to triggering comment `" + commentID + "`",
+		"multica spec workflow start " + issueID + " --comment " + commentID + " --intent <intent>",
+		"multica spec workflow update " + issueID + " --comment " + commentID,
+		"multica spec workflow resume " + issueID + " --from <old_comment_id> --trigger " + commentID,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("comment-triggered brief missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestCommentTriggeredWorkflowUsesIssueSpecRef(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		IssueSpecRef:     "50",
+		TriggerCommentID: "comment-50",
+	})
+
+	for _, want := range []string{
+		"multica spec status --issue 50 --output json",
+		"multica spec workflow list 50 --output json",
+		"multica spec workflow start 50 --comment comment-50",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runtime config missing spec ref command %q\n---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "multica spec workflow list 55555555-6666-7777-8888-999999999999") {
+		t.Fatalf("runtime config used internal issue UUID for spec workflow\n---\n%s", out)
+	}
+}
+
 // The CLAUDE.md workflow surface must carry the same issue-wide since-delta
 // new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
 // stay in sync.
@@ -366,35 +419,68 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
-// Squad-leader assignment briefs must open the parent with in_progress, but
-// must not treat the first dispatch turn as completion (no unconditional
-// in_review). Leaders move the parent to in_review only on a later re-trigger
-// once the overall goal is met.
-func TestSquadLeaderAssignmentProtocolKeepsParentInProgress(t *testing.T) {
+func TestAssignmentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
 	t.Parallel()
-	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	out := buildMetaSkillContent("claude", TaskContextForEnv{
+	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+	ctx := TaskContextForEnv{
 		IssueID:       issueID,
 		IsSquadLeader: true,
-	})
+	}
+	out := buildMetaSkillContent("claude", ctx)
 
 	for _, want := range []string{
-		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
-		"After this initial dispatch, leave the parent issue `in_progress`",
-		"do NOT run `multica issue status " + issueID + " in_review` or `done` on this turn",
-		"only then, if the overall goal is met, move the parent to `in_review`",
+		"You are acting as the squad leader for this assignment.",
+		"Your job is delegation and coordination only.",
+		"Choose the best squad member from your Squad Roster",
+		"Delegate exactly once",
+		"multica squad activity " + issueID + " action",
+		"Stop immediately after the delegation/activity record.",
+		"Do NOT implement the issue yourself",
+		"Squad leader output is delegation, not implementation.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("squad-leader assignment brief missing %q\n---\n%s", want, out)
 		}
 	}
-
-	for _, banned := range []string{
+	for _, bad := range []string{
+		"Complete the task within your Agent Identity boundaries.",
+		"Run `multica issue status " + issueID + " in_progress`",
 		"When done, run `multica issue status " + issueID + " in_review`",
-		"8. When done, run `multica issue status " + issueID + " in_review`",
+		"Final results MUST be delivered via `multica issue comment add`",
 	} {
-		if strings.Contains(out, banned) {
-			t.Errorf("squad-leader assignment brief must not contain ordinary-agent completion step %q\n---\n%s", banned, out)
+		if strings.Contains(out, bad) {
+			t.Errorf("squad-leader assignment brief must not contain executor instruction %q\n---\n%s", bad, out)
+		}
+	}
+}
+
+func TestCommentTriggeredSquadLeaderDelegatesOnly(t *testing.T) {
+	t.Parallel()
+	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+	ctx := TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: "comment-1",
+		IsSquadLeader:    true,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"Act only as squad leader.",
+		"delegate exactly once to the best squad member",
+		"Do not solve the issue in the leader turn.",
+		"multica squad activity " + issueID + " action",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("comment-triggered squad-leader brief missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"do any requested work first",
+		"post the result via step 7",
+		"If you produced actual work this turn",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("comment-triggered squad-leader brief must not contain executor instruction %q\n---\n%s", bad, out)
 		}
 	}
 }

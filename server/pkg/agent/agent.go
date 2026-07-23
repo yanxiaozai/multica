@@ -28,11 +28,12 @@ type ExecOptions struct {
 	// SystemPrompt is consumed only by providers that can pass or safely inline
 	// developer/system instructions. Hermes ACP intentionally ignores it and
 	// relies on cwd-scoped context files such as AGENTS.md instead.
-	SystemPrompt              string
-	ThreadName                string
-	MaxTurns                  int
-	Timeout                   time.Duration
-	SemanticInactivityTimeout time.Duration
+	SystemPrompt               string
+	ThreadName                 string
+	MaxTurns                   int
+	Timeout                    time.Duration
+	SemanticInactivityTimeout  time.Duration
+	FirstTurnNoProgressTimeout time.Duration
 	// IdleWatchdogTimeout optionally narrows the daemon's generic no-message
 	// watchdog for this execution. Zero keeps the daemon-wide window, and a
 	// value above that window cannot extend the global safety bound. The

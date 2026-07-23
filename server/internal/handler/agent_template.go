@@ -445,6 +445,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	rc, _ := json.Marshal(map[string]any{})
 	ce, _ := json.Marshal(map[string]string{})
 	ca, _ := json.Marshal([]string{})
+	specProfile, _ := json.Marshal(map[string]any{})
 
 	// Apply optional overrides — nil means "use template default".
 	description := tmpl.Description
@@ -462,6 +463,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		Name:               req.Name,
 		Description:        description,
 		Instructions:       instructions,
+		SpecProfile:        specProfile,
 		AvatarUrl:          avatarURL,
 		RuntimeMode:        runtime.RuntimeMode,
 		RuntimeConfig:      rc,

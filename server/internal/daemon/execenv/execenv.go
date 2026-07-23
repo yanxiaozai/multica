@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -92,6 +93,7 @@ type PrepareParams struct {
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID          string
+	IssueSpecRef     string // repository-local issue number/ref used for .spec/issues/<issue>.md
 	TriggerCommentID string // comment that triggered this task (empty for on_assign)
 	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
 	// CommentReplyTargets is set for a comment run that coalesced comments
@@ -117,6 +119,7 @@ type TaskContextForEnv struct {
 	AgentID                       string // unique ID of the dispatched agent
 	AgentName                     string
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
+	AgentSpecProfile              string // structured Spec Memory contribution profile, rendered separately from persona instructions
 	AgentSkills                   []SkillContextForEnv
 	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
 	Repos                         []RepoContextForEnv     // workspace repos available for checkout
@@ -132,16 +135,17 @@ type TaskContextForEnv struct {
 	// the Output section says text-only instead (MUL-4899). The orthogonal
 	// history-command policy is Slack-only and lives in the per-turn chat prompt
 	// (daemon/prompt.go) — the server has no Feishu history reader.
-	ChatChannelType         string
-	AutopilotRunID          string // non-empty for autopilot run_only tasks
-	AutopilotID             string
-	AutopilotTitle          string
-	AutopilotDescription    string
-	AutopilotSource         string
-	AutopilotTriggerPayload string
-	QuickCreatePrompt       string // non-empty for quick-create tasks
-	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	ChatChannelType                   string
+	AutopilotRunID                    string // non-empty for autopilot run_only tasks
+	AutopilotID                       string
+	AutopilotTitle                    string
+	AutopilotDescription              string
+	AutopilotSource                   string
+	AutopilotTriggerPayload           string
+	QuickCreatePrompt                 string // non-empty for quick-create tasks
+	SquadInstructionsGenerationPrompt string // non-empty for internal squad instructions generation tasks
+	HandoffNote                       string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
+	IsSquadLeader                     bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
@@ -169,6 +173,13 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+}
+
+func (ctx TaskContextForEnv) specIssueRef() string {
+	if strings.TrimSpace(ctx.IssueSpecRef) != "" {
+		return strings.TrimSpace(ctx.IssueSpecRef)
+	}
+	return strings.TrimSpace(ctx.IssueID)
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

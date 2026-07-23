@@ -1025,6 +1025,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"poll_interval", d.cfg.PollInterval,
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
+		"codex_semantic_inactivity_timeout", d.cfg.CodexSemanticInactivityTimeout,
+		"codex_first_turn_no_progress_timeout", d.cfg.CodexFirstTurnNoProgressTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
@@ -4114,53 +4116,62 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var specProfile string
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		specProfile = strings.TrimSpace(string(task.Agent.SpecProfile))
 	}
 
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
+	issueSpecRef := task.IssueID
+	if task.IssueNumber > 0 {
+		issueSpecRef = strconv.Itoa(int(task.IssueNumber))
+	}
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                          task.IssueID,
-		TriggerCommentID:                 task.TriggerCommentID,
-		TriggerThreadID:                  task.TriggerThreadID,
-		CommentReplyTargets:              commentReplyThreads(task),
-		NewCommentCount:                  task.NewCommentCount,
-		NewCommentsSince:                 task.NewCommentsSince,
-		PriorSessionResumed:              task.PriorSessionID != "",
-		AgentID:                          agentID,
-		AgentName:                        agentName,
-		AgentInstructions:                instructions,
-		AgentSkills:                      convertSkillsForEnv(skills),
-		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
-		Repos:                            convertReposForEnv(task.Repos),
-		ProjectID:                        task.ProjectID,
-		ProjectTitle:                     task.ProjectTitle,
-		ProjectDescription:               task.ProjectDescription,
-		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
-		ChatSessionID:                    task.ChatSessionID,
-		ChatChannelType:                  task.ChatChannelType,
-		AutopilotRunID:                   task.AutopilotRunID,
-		AutopilotID:                      task.AutopilotID,
-		AutopilotTitle:                   task.AutopilotTitle,
-		AutopilotDescription:             task.AutopilotDescription,
-		AutopilotSource:                  task.AutopilotSource,
-		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:                task.QuickCreatePrompt,
-		HandoffNote:                      task.HandoffNote,
-		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
-		RequestingUserName:               task.RequestingUserName,
-		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
-		InitiatorType:                    task.InitiatorType,
-		InitiatorID:                      task.InitiatorID,
-		InitiatorName:                    task.InitiatorName,
-		InitiatorEmail:                   task.InitiatorEmail,
-		WorkspaceContext:                 task.WorkspaceContext,
-		ConnectedApps:                    task.ConnectedApps,
+		IssueID:                           task.IssueID,
+		IssueSpecRef:                      issueSpecRef,
+		TriggerCommentID:                  task.TriggerCommentID,
+		TriggerThreadID:                   task.TriggerThreadID,
+		CommentReplyTargets:               commentReplyThreads(task),
+		NewCommentCount:                   task.NewCommentCount,
+		NewCommentsSince:                  task.NewCommentsSince,
+		PriorSessionResumed:               task.PriorSessionID != "",
+		AgentID:                           agentID,
+		AgentName:                         agentName,
+		AgentInstructions:                 instructions,
+		AgentSpecProfile:                  specProfile,
+		AgentSkills:                       convertSkillsForEnv(skills),
+		DisabledRuntimeSkills:             convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
+		Repos:                             convertReposForEnv(task.Repos),
+		ProjectID:                         task.ProjectID,
+		ProjectTitle:                      task.ProjectTitle,
+		ProjectDescription:                task.ProjectDescription,
+		ProjectResources:                  convertProjectResourcesForEnv(task.ProjectResources),
+		ChatSessionID:                     task.ChatSessionID,
+		ChatChannelType:                   task.ChatChannelType,
+		AutopilotRunID:                    task.AutopilotRunID,
+		AutopilotID:                       task.AutopilotID,
+		AutopilotTitle:                    task.AutopilotTitle,
+		AutopilotDescription:              task.AutopilotDescription,
+		AutopilotSource:                   task.AutopilotSource,
+		AutopilotTriggerPayload:           strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		QuickCreatePrompt:                 task.QuickCreatePrompt,
+		SquadInstructionsGenerationPrompt: task.SquadInstructionsGenerationPrompt,
+		HandoffNote:                       task.HandoffNote,
+		IsSquadLeader:                     strings.Contains(instructions, "## Squad Operating Protocol"),
+		RequestingUserName:                task.RequestingUserName,
+		RequestingUserProfileDescription:  task.RequestingUserProfileDescription,
+		InitiatorType:                     task.InitiatorType,
+		InitiatorID:                       task.InitiatorID,
+		InitiatorName:                     task.InitiatorName,
+		InitiatorEmail:                    task.InitiatorEmail,
+		WorkspaceContext:                  task.WorkspaceContext,
+		ConnectedApps:                     task.ConnectedApps,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -4631,14 +4642,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
-		Model:                     model,
-		ThreadName:                deriveTaskThreadName(task),
-		Timeout:                   d.cfg.AgentTimeout,
-		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
-		IdleWatchdogTimeout:       idleWatchdogTimeout,
-		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
-		ResumeSessionID:           task.PriorSessionID,
+		Cwd:                        env.WorkDir,
+		Model:                      model,
+		ThreadName:                 deriveTaskThreadName(task),
+		Timeout:                    d.cfg.AgentTimeout,
+		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
+		IdleWatchdogTimeout:        idleWatchdogTimeout,
+		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the brief instead). If it
 		// survived to here, the backend must disclose to the user when the live

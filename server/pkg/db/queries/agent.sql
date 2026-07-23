@@ -27,12 +27,12 @@ WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    instructions, spec_profile, custom_env, custom_args, mcp_config, model, thinking_level,
     composio_toolkit_allowlist, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16,
+    $11, $12, $13, $14, $15, $16, $17,
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
@@ -80,12 +80,14 @@ UPDATE agent SET
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
+    spec_profile = COALESCE(sqlc.narg('spec_profile'), spec_profile),
     custom_env = COALESCE(sqlc.narg('custom_env'), custom_env),
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    agent_evolution_enabled = COALESCE(sqlc.narg('agent_evolution_enabled'), agent_evolution_enabled),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -897,6 +899,15 @@ FOR UPDATE;
 -- or running task for the issue.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+
+-- name: HasOtherActiveTaskForIssue :one
+-- Returns true if there is any active issue task other than the current task.
+-- Squad leaders record their routing outcome before their own task completes,
+-- so "ready for review" checks must ignore that still-running leader task.
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1
+  AND id <> $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.

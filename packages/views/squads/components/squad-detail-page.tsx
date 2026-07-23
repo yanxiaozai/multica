@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { ApiError, api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing } from "@multica/core/utils";
-import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowUpRight, Crown, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save, Sparkles } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -50,7 +52,6 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { ContentEditor } from "../../editor/content-editor";
 import {
   PickerItem,
@@ -59,7 +60,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadInstructionsGenerationJob, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -101,22 +102,26 @@ export function SquadDetailPage() {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
+  // Runtimes are only fetched when the Create Agent dialog might open;
+  // gating on isWorkspaceAdmin below means non-admins never trigger the
+  // request. The runtime list mirrors the agents page so the picker
+  // (and the "only my runtimes" filter) behaves identically here.
   const currentUser = useAuthStore((s) => s.user);
   const myRole = useMemo(() => {
     if (!currentUser) return null;
     return wsMembers.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [wsMembers, currentUser]);
   const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
-  // Per-squad management gate: workspace owner/admin manage every squad; the
-  // creator manages the squads they created. Mirrors canManageSquad in
-  // server/internal/handler/squad.go so editable controls appear exactly when
-  // the API will accept the write, and everyone else gets a read-only view
-  // instead of controls that 403 (MUL-4223).
-  const canManage =
-    isWorkspaceAdmin || (!!currentUser && squad?.creator_id === currentUser.id);
+
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !!wsId && isWorkspaceAdmin,
+  });
 
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [instructionsGenerationJobId, setInstructionsGenerationJobId] = useState<string | null>(null);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -126,6 +131,32 @@ export function SquadDetailPage() {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     },
   });
+
+  const generateInstructionsMut = useMutation({
+    mutationFn: () => api.generateSquadInstructions(squadId, { mode: "template" }),
+  });
+
+  const generateInstructionsFromAgentDocsMut = useMutation({
+    mutationFn: (draft: string) => api.createSquadInstructionsGenerationJob(squadId, { mode: "agent_docs", draft }),
+    onSuccess: (job) => {
+      setInstructionsGenerationJobId(job.id);
+    },
+    onError: (error) => {
+      const detail = error instanceof ApiError ? ` (${error.status}: ${error.message})` : "";
+      toast.error(`${t(($) => $.instructions_tab.ai_generate_failed_toast)}${detail}`);
+    },
+  });
+
+  const instructionsGenerationJobQuery = useQuery({
+    queryKey: [...workspaceKeys.squads(wsId), squadId, "instructions-generation", instructionsGenerationJobId],
+    queryFn: () => api.getSquadInstructionsGenerationJob(squadId, instructionsGenerationJobId!),
+    enabled: Boolean(workspace?.id && squadId && instructionsGenerationJobId),
+    refetchInterval: instructionsGenerationJobId ? 2000 : false,
+  });
+
+  const clearInstructionsGenerationJob = useCallback(() => {
+    setInstructionsGenerationJobId(null);
+  }, []);
 
   const addMemberMut = useMutation({
     mutationFn: (input: { type: "agent" | "member"; id: string; role?: string }) =>
@@ -177,6 +208,25 @@ export function SquadDetailPage() {
       toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
   });
 
+  // CreateAgentDialog's onCreate contract: hit POST /api/agents and
+  // return the created agent so the dialog can run its skill follow-up.
+  // We deliberately do NOT navigate to the agent detail page (that's
+  // the agents-page behaviour) — the user clicked Create Agent from
+  // inside this squad, so the dialog will stay open just long enough
+  // to also call addSquadMember (handled by the dialog when squadId
+  // is set), then close the user back to Members where they can
+  // verify the new agent appeared. Cache-update keeps the agents list
+  // fresh for any pickers that read from it.
+  const handleCreateAgent = async (data: CreateAgentRequest): Promise<Agent> => {
+    const agent = await api.createAgent(data);
+    queryClient.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === agent.id);
+      return exists ? current.map((a) => (a.id === agent.id ? agent : a)) : [...current, agent];
+    });
+    queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    return agent;
+  };
+
   const getEntityName = (type: string, id: string) => {
     if (type === "agent") return agents.find((a: Agent) => a.id === id)?.name ?? id.slice(0, 8);
     return wsMembers.find((m) => m.user_id === id)?.name ?? id.slice(0, 8);
@@ -210,12 +260,10 @@ export function SquadDetailPage() {
           </>
         }
         actions={
-          canManage ? (
-            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
-              <Trash2 className="size-3.5 mr-1" />
-              {t(($) => $.inspector.archive_button)}
-            </Button>
-          ) : null
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
+            <Trash2 className="size-3.5 mr-1" />
+            {t(($) => $.inspector.archive_button)}
+          </Button>
         }
       />
 
@@ -228,7 +276,7 @@ export function SquadDetailPage() {
           memberCount={members.length}
           leaderName={getEntityName("agent", squad.leader_id)}
           creatorName={getEntityName("member", squad.creator_id)}
-          canManage={canManage}
+          uploadingAvatar={updateSquadMut.isPending}
           onUploadAvatar={(url) => updateSquadMut.mutateAsync({ avatar_url: url })}
           onRename={async (next) => { await updateSquadMut.mutateAsync({ name: next.trim() }); }}
           onUpdateDescription={async (next) => { await updateSquadMut.mutateAsync({ description: next }); }}
@@ -238,16 +286,32 @@ export function SquadDetailPage() {
           squad={squad}
           members={members}
           memberStatusById={memberStatusById}
-          canManage={canManage}
           isLeader={isLeader}
           isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
-          onCreateAgentClick={canManage ? () => push(`${p.newAgent()}?squad=${encodeURIComponent(squadId)}`) : undefined}
+          onCreateAgentClick={isWorkspaceAdmin ? () => setShowCreateAgent(true) : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
-          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success("Instructions saved"); }}
+          onGenerateInstructions={async () => {
+            const generated = await generateInstructionsMut.mutateAsync();
+            if (generated.warnings.length > 0) {
+              toast.warning(generated.warnings[0]);
+            }
+            return generated.instructions;
+          }}
+          onGenerateInstructionsFromAgentDocs={async (draft) => {
+            await generateInstructionsFromAgentDocsMut.mutateAsync(draft);
+          }}
+          generatingInstructionsFromAgentDocs={
+            generateInstructionsFromAgentDocsMut.isPending ||
+            instructionsGenerationJobQuery.data?.status === "queued" ||
+            instructionsGenerationJobQuery.data?.status === "running"
+          }
+          instructionsGenerationJob={instructionsGenerationJobQuery.data}
+          onInstructionsGenerationHandled={clearInstructionsGenerationJob}
+          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success(t(($) => $.instructions_tab.saved_toast)); }}
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>
@@ -258,6 +322,24 @@ export function SquadDetailPage() {
           availableAgents={availableAgents}
           onClose={() => setShowAddMember(false)}
           onSubmit={async (input) => { await addMemberMut.mutateAsync(input); }}
+        />
+      )}
+
+      {/* Squad-scoped create flow: same dialog as the Agents page but
+          with squadId set, so the dialog runs api.addSquadMember after
+          api.createAgent and skips the agent-detail navigation. Only
+          mounted for workspace owner/admin since AddSquadMember is
+          owner/admin-gated server-side; for everyone else the trigger
+          never renders. */}
+      {showCreateAgent && isWorkspaceAdmin && (
+        <CreateAgentDialog
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={wsMembers}
+          currentUserId={currentUser?.id ?? null}
+          squadId={squadId}
+          onClose={() => setShowCreateAgent(false)}
+          onCreate={handleCreateAgent}
         />
       )}
 
@@ -305,7 +387,7 @@ function SquadDetailSkeleton() {
       </PageHeader>
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="flex flex-col gap-4 rounded-lg border p-5">
-          <Skeleton className="h-16 w-16 rounded-full" />
+          <Skeleton className="h-16 w-16 rounded-lg" />
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-3 w-full" />
           <div className="space-y-2">
@@ -340,31 +422,82 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
       name={squad.name}
       initials={initials}
       avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-      size="sm"
-      className="shrink-0"
+      size="xs"
+      className="rounded"
     />
   );
 }
 
-// Read-only 64px avatar for viewers who can't manage the squad — same visual
-// as the editable control's resting state but without the click/upload
-// affordance.
-function SquadStaticAvatar({ squad, initials }: { squad: Squad; initials: string }) {
+// Large click-to-upload avatar editor. Mirrors AvatarEditor in
+// agent-detail-inspector.tsx — square (rounded-md) treatment is reserved
+// for non-human actors (agent, squad), circles for humans.
+function SquadAvatarEditor({
+  squad,
+  initials,
+  uploading,
+  onUpload,
+}: {
+  squad: Squad;
+  initials: string;
+  uploading: boolean;
+  onUpload: (url: string) => Promise<unknown>;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { upload, uploading: fileUploading } = useFileUpload(api);
+  const busy = uploading || fileUploading;
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    try {
+      const result = await upload(file);
+      if (!result) return;
+      await onUpload(result.link);
+      toast.success("Avatar updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+    }
+  };
+
   return (
-    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
-      {squad.avatar_url ? (
-        <ActorAvatarBase
-          name={squad.name}
-          initials={initials}
-          avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-          size="2xl"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-          <Users className="h-7 w-7" />
+    <>
+      <button
+        type="button"
+        className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={busy}
+        aria-label="Change squad avatar"
+      >
+        {squad.avatar_url ? (
+          <ActorAvatarBase
+            name={squad.name}
+            initials={initials}
+            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
+            size="2xl"
+            className="rounded-none"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+            <Users className="h-7 w-7" />
+          </div>
+        )}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin text-white" />
+          ) : (
+            <Camera className="h-4 w-4 text-white" />
+          )}
         </div>
-      )}
-    </div>
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFile}
+      />
+    </>
   );
 }
 
@@ -713,7 +846,7 @@ function SquadDetailInspector({
   memberCount,
   leaderName,
   creatorName,
-  canManage,
+  uploadingAvatar,
   onUploadAvatar,
   onRename,
   onUpdateDescription,
@@ -722,10 +855,7 @@ function SquadDetailInspector({
   memberCount: number;
   leaderName: string;
   creatorName: string;
-  // When false the identity block renders as static text (no avatar upload,
-  // no rename/description popovers) — the viewer can read the squad but not
-  // edit it. Mirrors the agent inspector's `canEdit` read-only treatment.
-  canManage: boolean;
+  uploadingAvatar: boolean;
   onUploadAvatar: (url: string) => Promise<unknown>;
   onRename: (next: string) => Promise<void>;
   onUpdateDescription: (next: string) => Promise<void>;
@@ -743,40 +873,19 @@ function SquadDetailInspector({
     <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       {/* Identity */}
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
-        {canManage ? (
-          <>
-            <AvatarUploadControl
-              variant="squad"
-              value={squad.avatar_url ?? null}
-              name={squad.name}
-              size={64}
-              onUploaded={onUploadAvatar}
-            />
-            <div className="flex flex-col gap-1">
-              <SquadNameEditor value={squad.name} onSave={onRename} />
-              <SquadDescriptionEditor
-                value={squad.description ?? ""}
-                onSave={onUpdateDescription}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <SquadStaticAvatar squad={squad} initials={initials} />
-            <div className="flex flex-col gap-1">
-              <span className="text-lg font-semibold leading-tight">{squad.name}</span>
-              {squad.description ? (
-                <span className="text-xs leading-relaxed text-muted-foreground">
-                  {squad.description}
-                </span>
-              ) : (
-                <span className="text-xs italic leading-relaxed text-muted-foreground/50">
-                  {t(($) => $.description_dialog.placeholder_empty)}
-                </span>
-              )}
-            </div>
-          </>
-        )}
+        <SquadAvatarEditor
+          squad={squad}
+          initials={initials}
+          uploading={uploadingAvatar}
+          onUpload={onUploadAvatar}
+        />
+        <div className="flex flex-col gap-1">
+          <SquadNameEditor value={squad.name} onSave={onRename} />
+          <SquadDescriptionEditor
+            value={squad.description ?? ""}
+            onSave={onUpdateDescription}
+          />
+        </div>
       </div>
 
       {/* Details — read-only */}
@@ -876,13 +985,10 @@ function SquadDescriptionEditorBody({
   const { t } = useT("squads");
   const [draft, setDraft] = useState(initialValue);
   const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
   const dirty = draft !== initialValue;
 
   const commit = async () => {
-    if (savingRef.current) return;
     if (!dirty) { onClose(); return; }
-    savingRef.current = true;
     setSaving(true);
     try {
       await onSave(draft);
@@ -890,7 +996,6 @@ function SquadDescriptionEditorBody({
     } catch {
       // toast handled by parent's mutation
     } finally {
-      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -908,8 +1013,8 @@ function SquadDescriptionEditorBody({
         rows={6}
         onKeyDown={(e) => {
           if (e.key === "Escape") { onClose(); return; }
-          if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
-          if (shortcutMatchesEvent(getShortcut("send"), e.nativeEvent)) {
+          if (isImeComposing(e)) return;
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             void commit();
           }
@@ -942,7 +1047,6 @@ function SquadOverviewPane({
   squad,
   members,
   memberStatusById,
-  canManage,
   isLeader,
   isArchived,
   getEntityName,
@@ -951,27 +1055,33 @@ function SquadOverviewPane({
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
+  onGenerateInstructions,
+  onGenerateInstructionsFromAgentDocs,
+  generatingInstructionsFromAgentDocs,
+  instructionsGenerationJob,
+  onInstructionsGenerationHandled,
   onSaveInstructions,
   setLeaderPending,
 }: {
   squad: Squad;
   members: SquadMember[];
   memberStatusById: Map<string, SquadMemberStatus>;
-  // Gates every mutating control in the Members and Instructions tabs. When
-  // false the tabs render read-only (no add/remove/leader/role edits, no
-  // Save). See canManageSquad in server/internal/handler/squad.go.
-  canManage: boolean;
   isLeader: (m: SquadMember) => boolean;
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
   // Optional — only passed when the current user can manage the squad
-  // (workspace owner/admin or the creator). Hidden otherwise so viewers
-  // don't see a button they can't action.
+  // (workspace owner/admin). Hidden otherwise so plain members don't
+  // see a button they can't action.
   onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
+  onGenerateInstructions: () => Promise<string>;
+  onGenerateInstructionsFromAgentDocs: (draft: string) => Promise<void>;
+  generatingInstructionsFromAgentDocs: boolean;
+  instructionsGenerationJob?: SquadInstructionsGenerationJob;
+  onInstructionsGenerationHandled: () => void;
   onSaveInstructions: (next: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
@@ -1020,7 +1130,6 @@ function SquadOverviewPane({
             <SquadMembersTab
               members={members}
               memberStatusById={memberStatusById}
-              canManage={canManage}
               isLeader={isLeader}
               isArchived={isArchived}
               getEntityName={getEntityName}
@@ -1037,7 +1146,11 @@ function SquadOverviewPane({
           <div className="flex h-full flex-col p-4 md:p-6">
             <SquadInstructionsTab
               squad={squad}
-              canManage={canManage}
+              onGenerate={onGenerateInstructions}
+              onGenerateFromAgentDocs={onGenerateInstructionsFromAgentDocs}
+              generatingFromAgentDocs={generatingInstructionsFromAgentDocs}
+              generationJob={instructionsGenerationJob}
+              onGenerationHandled={onInstructionsGenerationHandled}
               onSave={onSaveInstructions}
               onDirtyChange={setActiveDirty}
             />
@@ -1085,7 +1198,6 @@ const SQUAD_STATUS_DOT_CLASS: Record<SquadMemberStatusValue, string> = {
 function SquadMembersTab({
   members,
   memberStatusById,
-  canManage,
   isLeader,
   isArchived,
   getEntityName,
@@ -1098,14 +1210,11 @@ function SquadMembersTab({
 }: {
   members: SquadMember[];
   memberStatusById: Map<string, SquadMemberStatus>;
-  // When false, add/create/leader/remove controls and role editing are hidden;
-  // the roster stays visible and read-only.
-  canManage: boolean;
   isLeader: (m: SquadMember) => boolean;
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
-  // Hidden for viewers who can't manage — see SquadOverviewPane.
+  // Hidden for non-admins — see SquadOverviewPane.
   onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
@@ -1124,20 +1233,18 @@ function SquadMembersTab({
             {t(($) => $.members_tab.section_count, { count: members.length })}
           </p>
         </div>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            {onCreateAgentClick && (
-              <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
-                <Plus className="size-3.5 mr-1.5" />
-                {t(($) => $.members_tab.create_agent_button)}
-              </Button>
-            )}
-            <Button size="sm" variant="outline" onClick={onAddMemberClick}>
+        <div className="flex items-center gap-2">
+          {onCreateAgentClick && (
+            <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
               <Plus className="size-3.5 mr-1.5" />
-              {t(($) => $.members_tab.add_member_button)}
+              {t(($) => $.members_tab.create_agent_button)}
             </Button>
-          </div>
-        )}
+          )}
+          <Button size="sm" variant="outline" onClick={onAddMemberClick}>
+            <Plus className="size-3.5 mr-1.5" />
+            {t(($) => $.members_tab.add_member_button)}
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -1190,14 +1297,10 @@ function SquadMembersTab({
                     </span>
                   )}
                 </div>
-                {canManage ? (
-                  <RoleEditor
-                    value={m.role ?? ""}
-                    onSave={async (next) => { await onUpdateRole(m, next); }}
-                  />
-                ) : m.role ? (
-                  <div className="mt-0.5 text-xs text-muted-foreground">{m.role}</div>
-                ) : null}
+                <RoleEditor
+                  value={m.role ?? ""}
+                  onSave={async (next) => { await onUpdateRole(m, next); }}
+                />
                 {primaryIssue && (
                   <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground min-w-0">
                     <AppLink
@@ -1246,7 +1349,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {canManage && m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
+              {m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1267,7 +1370,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {canManage && !isLeader(m) && (
+              {!isLeader(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1301,28 +1404,90 @@ function SquadMembersTab({
 // (server/internal/handler/daemon.go).
 function SquadInstructionsTab({
   squad,
-  canManage,
+  onGenerate,
+  onGenerateFromAgentDocs,
+  generatingFromAgentDocs,
+  generationJob,
+  onGenerationHandled,
   onSave,
   onDirtyChange,
 }: {
   squad: Squad;
-  canManage: boolean;
+  onGenerate: () => Promise<string>;
+  onGenerateFromAgentDocs: (draft: string) => Promise<void>;
+  generatingFromAgentDocs: boolean;
+  generationJob?: SquadInstructionsGenerationJob;
+  onGenerationHandled: () => void;
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("squads");
   const [value, setValue] = useState(squad.instructions ?? "");
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [editorVersion, setEditorVersion] = useState(0);
   const isDirty = value !== (squad.instructions ?? "");
+  const valueRef = useRef(value);
+  const persistedInstructionsRef = useRef(squad.instructions ?? "");
+  const handledGenerationJobRef = useRef<string | null>(null);
+
+  const generationStatusText = generationJob?.status === "queued"
+    ? t(($) => $.instructions_tab.ai_status_queued)
+    : generationJob?.status === "running"
+      ? t(($) => $.instructions_tab.ai_status_running)
+      : generationJob?.status === "completed"
+        ? t(($) => $.instructions_tab.ai_status_completed)
+        : generationJob?.status === "failed"
+          ? t(($) => $.instructions_tab.ai_status_failed)
+          : null;
 
   useEffect(() => {
     setValue(squad.instructions ?? "");
+    setEditorVersion((v) => v + 1);
+    persistedInstructionsRef.current = squad.instructions ?? "";
   }, [squad.id, squad.instructions]);
 
   useEffect(() => {
-    // A read-only viewer never has unsaved changes to guard on tab-switch.
-    onDirtyChange?.(canManage && isDirty);
-  }, [canManage, isDirty, onDirtyChange]);
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    if (!generationJob) return;
+    const handledKey = `${generationJob.id}:${generationJob.status}:${generationJob.updated_at}`;
+    if (handledGenerationJobRef.current === handledKey) return;
+
+    if (generationJob.status === "completed") {
+      handledGenerationJobRef.current = handledKey;
+      const next = generationJob.instructions.trim();
+      if (!next) {
+        toast.error(t(($) => $.instructions_tab.ai_generate_failed_toast));
+        onGenerationHandled();
+        return;
+      }
+      const current = valueRef.current;
+      const persisted = persistedInstructionsRef.current;
+      if (current !== persisted && !window.confirm(t(($) => $.instructions_tab.replace_confirm))) {
+        onGenerationHandled();
+        return;
+      }
+      setValue(next);
+      setEditorVersion((v) => v + 1);
+      toast.success(t(($) => $.instructions_tab.ai_generated_toast));
+      onGenerationHandled();
+      return;
+    }
+
+    if (generationJob.status === "failed" || generationJob.status === "cancelled") {
+      handledGenerationJobRef.current = handledKey;
+      const detail = generationJob.error ? ` (${generationJob.error})` : "";
+      toast.error(`${t(($) => $.instructions_tab.ai_generate_failed_toast)}${detail}`);
+      onGenerationHandled();
+    }
+  }, [generationJob, onGenerationHandled, t]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -1335,52 +1500,82 @@ function SquadInstructionsTab({
     }
   };
 
+  const handleGenerate = async () => {
+    if (isDirty && !window.confirm(t(($) => $.instructions_tab.replace_confirm))) {
+      return;
+    }
+    setGenerating(true);
+    try {
+      const next = await onGenerate();
+      setValue(next);
+      setEditorVersion((v) => v + 1);
+      toast.success(t(($) => $.instructions_tab.generated_toast));
+    } catch (error) {
+      const detail = error instanceof ApiError ? ` (${error.status}: ${error.message})` : "";
+      toast.error(`${t(($) => $.instructions_tab.generate_failed_toast)}${detail}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateFromAgentDocs = async () => {
+    try {
+      await onGenerateFromAgentDocs(value);
+    } catch {
+      // toast handled by parent mutation
+    }
+  };
+
   return (
     <div className="flex h-full flex-col gap-4">
       <p className="text-xs text-muted-foreground">
         {t(($) => $.instructions_tab.description)}
       </p>
 
-      {/* When the viewer can't manage the squad, the editor is wrapped in a
-          pointer-events-none / aria-disabled shell — ContentEditor reads
-          `editable` at mount and can't be toggled, so this is the documented
-          way to present it read-only (see editor/content-editor.tsx). */}
-      <div
-        aria-disabled={!canManage}
-        className={`flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors ${
-          canManage ? "focus-within:border-input" : "pointer-events-none"
-        }`}
-      >
+      <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
         <ContentEditor
-          key={squad.id}
-          value={value}
-          onUpdate={canManage ? setValue : () => {}}
-          placeholder={
-            canManage
-              ? "e.g. Always start by writing a failing test. Prefer small, atomic commits."
-              : ""
-          }
+          key={`${squad.id}:${editorVersion}`}
+          defaultValue={value}
+          onUpdate={setValue}
+          placeholder="e.g. Always start by writing a failing test. Prefer small, atomic commits."
           debounceMs={150}
           disableMentions
           className="min-h-full"
         />
       </div>
 
-      {canManage && (
-        <div className="flex items-center justify-end gap-3">
-          {isDirty && (
-            <span className="text-xs text-muted-foreground">{t(($) => $.instructions_tab.unsaved_changes)}</span>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {isDirty && (
+          <span className="text-xs text-muted-foreground">{t(($) => $.instructions_tab.unsaved_changes)}</span>
+        )}
+        {generationStatusText && (
+          <span className="text-xs text-muted-foreground">{generationStatusText}</span>
+        )}
+        <Button size="sm" variant="outline" onClick={() => void handleGenerateFromAgentDocs()} disabled={generatingFromAgentDocs || saving}>
+          {generatingFromAgentDocs ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
           )}
-          <Button size="sm" onClick={handleSave} disabled={!isDirty || saving}>
-            {saving ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Save className="h-3.5 w-3.5" />
-            )}
-            {t(($) => $.instructions_tab.save_button)}
-          </Button>
-        </div>
-      )}
+          {generatingFromAgentDocs ? t(($) => $.instructions_tab.ai_generating_button) : t(($) => $.instructions_tab.ai_generate_button)}
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleGenerate} disabled={generating || saving}>
+          {generating ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+          {t(($) => $.instructions_tab.generate_button)}
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={!isDirty || saving}>
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          {t(($) => $.instructions_tab.save_button)}
+        </Button>
+      </div>
     </div>
   );
 }

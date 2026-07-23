@@ -79,6 +79,19 @@
   "instructions_tab": {
     "description": "スクワッドの指示は、リーダーエージェントがこのスクワッドに割り当てられたイシューに取り組むたびに、そのプロンプトに挿入されます。スクワッド全体の方針、作業上の取り決め、リーダーがすべてのタスクで従うべきコンテキストを伝えるために使用します。",
     "unsaved_changes": "保存していない変更",
+    "generate_button": "下書きを生成",
+    "ai_generate_button": "エージェント文書を要約",
+    "ai_generating_button": "要約中...",
+    "ai_status_queued": "AI下書きはキューに入りました",
+    "ai_status_running": "AI下書きを生成中",
+    "ai_status_completed": "AI下書きが完了しました",
+    "ai_status_failed": "AI下書きに失敗しました",
+    "replace_confirm": "保存していない指示を生成した下書きで置き換えますか？",
+    "generated_toast": "下書きを生成しました",
+    "ai_generated_toast": "AI下書きができました。確認して保存してください。",
+    "generate_failed_toast": "下書きの生成に失敗しました",
+    "ai_generate_failed_toast": "エージェント文書の要約に失敗しました",
+    "saved_toast": "指示を保存しました",
     "save_button": "保存"
   },
   "scope": {

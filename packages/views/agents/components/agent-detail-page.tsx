@@ -25,7 +25,6 @@ import {
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -71,8 +70,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
-  const currentUser = useAuthStore((s) => s.user);
-
   const {
     data: agents = [],
     isLoading: agentsLoading,
@@ -323,12 +320,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         <AgentOverviewPane
           agent={agent}
-          runtime={runtime}
-          owner={owner}
           runtimes={runtimes}
-          members={members}
           onUpdate={handleUpdate}
-          currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}

@@ -121,6 +121,14 @@ UPDATE issue SET
 WHERE id = $1 AND workspace_id = $3
 RETURNING *;
 
+-- name: UpdateIssueStatusIfCurrent :one
+-- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
+UPDATE issue SET
+    status = @next_status,
+    updated_at = now()
+WHERE id = @id AND workspace_id = @workspace_id AND status = @current_status
+RETURNING *;
+
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,

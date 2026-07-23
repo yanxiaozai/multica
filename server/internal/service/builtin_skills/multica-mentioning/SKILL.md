@@ -65,6 +65,13 @@ leader to the trigger set; everything that is not `agent` after that is skipped
 (`if m.Type != "agent" { continue }`), then the `agent` branch adds that agent.
 A `member` or `issue` mention reaches neither branch, so it enqueues no task.
 
+Agent and squad mentions are for work that should start now. When you are only
+describing a future handoff, an implementation boundary, or who should receive
+the next phase later, write the plain agent/squad name or inline code instead
+of a `mention://agent/...` or `mention://squad/...` link. The comment trigger
+path filters narrow "future boundary" references defensively, but the safe rule
+for agents is simple: no runnable mention unless you want a run queued.
+
 A `member` mention therefore does NOT make a person "run", and this skill does
 NOT claim it delivers a notification through the Go comment handler — there is
 no such code path in that handler (see the source map). What is verified is the

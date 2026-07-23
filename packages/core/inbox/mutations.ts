@@ -1,8 +1,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { ApiError } from "../api/client";
 import { inboxKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
+
+export function isMissingInboxItemError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+function removeInboxItem(items: InboxItem[] | undefined, id: string) {
+  return items?.filter((item) => item.id !== id);
+}
 
 export function useMarkInboxRead() {
   const qc = useQueryClient();
@@ -22,7 +31,13 @@ export function useMarkInboxRead() {
       qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), markRead);
       return { prev, prevArchived };
     },
-    onError: (_err, _id, ctx) => {
+    onError: (err, id, ctx) => {
+      if (isMissingInboxItemError(err)) {
+        qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+          removeInboxItem(old, id),
+        );
+        return;
+      }
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
       if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
     },
@@ -52,7 +67,13 @@ export function useArchiveInbox() {
       );
       return { prev };
     },
-    onError: (_err, _id, ctx) => {
+    onError: (err, id, ctx) => {
+      if (isMissingInboxItemError(err)) {
+        qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+          removeInboxItem(old, id),
+        );
+        return;
+      }
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
     },
     onSettled: () => {

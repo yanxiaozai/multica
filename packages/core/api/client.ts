@@ -13,7 +13,10 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
+  AgentEvolutionApplication,
+  AgentLearningReport,
   CreateAgentRequest,
+  CreateAgentLearningReportRequest,
   AgentTemplate,
   AgentTemplateSummary,
   CreateAgentFromTemplateRequest,
@@ -36,6 +39,15 @@ import type {
   CommentTriggerPreview,
   IssueTriggerPreview,
   IssueTriggerPreviewParams,
+  IssueIntegration,
+  IssueSyncConfig,
+  ListIssueIntegrationsResponse,
+  ListIssueSyncConfigsResponse,
+  CreateGitLabIssueIntegrationRequest,
+  UpdateIssueIntegrationRequest,
+  TestIssueIntegrationResponse,
+  UpsertIssueSyncConfigRequest,
+  ProjectGitLabImportResult,
   Reaction,
   IssueReaction,
   Workspace,
@@ -136,6 +148,10 @@ import type {
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
   Squad,
+  GenerateSquadInstructionsRequest,
+  GenerateSquadInstructionsResponse,
+  CreateSquadInstructionsGenerationRequest,
+  SquadInstructionsGenerationJob,
   SquadMember,
   SquadMemberStatusListResponse,
   BillingBalance,
@@ -147,6 +163,24 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  CreateSpecDecisionRequest,
+  CreateSpecDecisionResponse,
+  AppendIssueDraftMessageRequest,
+  CreateIssueDraftRequest,
+  IssueDraftBundle,
+  ListIssueDraftSessionsResponse,
+  ListSpecDocumentsResponse,
+  ListSpecEpicsResponse,
+  ListSpecModulesResponse,
+  SpecIssueContext,
+  SyncSpecFromFilesRequest,
+  SyncSpecFromFilesResponse,
+  UpdateIssueSpecMappingRequest,
+  UpdateIssueSpecMappingResponse,
+  UpdateIssueSpecStateRequest,
+  UpdateIssueSpecStateResponse,
+  UpdateSpecDocumentRequest,
+  UpdateSpecDocumentResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
@@ -163,6 +197,9 @@ import {
   AgentTaskListSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AgentEvolutionApplicationSchema,
+  AgentLearningReportListSchema,
+  AgentLearningReportSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -180,16 +217,27 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_AGENT_EVOLUTION_APPLICATION,
+  EMPTY_AGENT_LEARNING_REPORT,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_AGENT_BUILDER_SESSION,
+  EMPTY_GENERATE_SQUAD_INSTRUCTIONS_RESPONSE,
+  EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_INTEGRATION,
+  EMPTY_ISSUE_SYNC_CONFIG,
+  EMPTY_ISSUE_DRAFT_BUNDLE,
+  EMPTY_LIST_ISSUE_DRAFT_SESSIONS_RESPONSE,
+  EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE,
+  EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
+  EMPTY_TEST_ISSUE_INTEGRATION_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
@@ -199,15 +247,24 @@ import {
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
   type AppConfigResponse,
+  GenerateSquadInstructionsResponseSchema,
+  SquadInstructionsGenerationJobSchema,
   GroupedIssuesResponseSchema,
+  IssueIntegrationResponseSchema,
+  IssueDraftBundleSchema,
+  ListIssueDraftSessionsResponseSchema,
+  IssueDraftMessageSchema,
+  IssueSyncConfigResponseSchema,
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   CronPreviewResponseSchema,
   UNREADABLE_CRON_PREVIEW_RESPONSE,
+  ListIssueIntegrationsResponseSchema,
   ListIssuesResponseSchema,
   CreateIssueResponseSchema,
+  ListIssueSyncConfigsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -220,6 +277,7 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  TestIssueIntegrationResponseSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
   BillingBalanceSchema,
@@ -242,6 +300,24 @@ import {
   EMPTY_CHAT_DRAFT_RESTORES,
   CreateFeedbackResponseSchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
+  EMPTY_CREATE_SPEC_DECISION_RESPONSE,
+  EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE,
+  EMPTY_LIST_SPEC_EPICS_RESPONSE,
+  EMPTY_LIST_SPEC_MODULES_RESPONSE,
+  EMPTY_SPEC_ISSUE_CONTEXT,
+  EMPTY_SYNC_SPEC_FROM_FILES_RESPONSE,
+  EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE,
+  EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE,
+  EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE,
+  CreateSpecDecisionResponseSchema,
+  ListSpecDocumentsResponseSchema,
+  ListSpecEpicsResponseSchema,
+  ListSpecModulesResponseSchema,
+  SpecIssueContextSchema,
+  SyncSpecFromFilesResponseSchema,
+  UpdateIssueSpecMappingResponseSchema,
+  UpdateIssueSpecStateResponseSchema,
+  UpdateSpecDocumentResponseSchema,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
   InboxItemListSchema,
@@ -298,6 +374,27 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+type ApiFetchInit = RequestInit & {
+  extraHeaders?: Record<string, string>;
+  omitWorkspaceSlug?: boolean;
+};
+
+type IssueBridgeWorkspaceParams = {
+  workspace_id?: string;
+};
+
+function issueBridgePath(path: string, params?: IssueBridgeWorkspaceParams): string {
+  const search = new URLSearchParams();
+  if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function issueBridgeInit(params?: IssueBridgeWorkspaceParams, init?: ApiFetchInit): ApiFetchInit | undefined {
+  if (!params?.workspace_id) return init;
+  return { ...init, omitWorkspaceSlug: true };
 }
 
 export class ApiError extends Error {
@@ -387,11 +484,11 @@ export class ApiClient {
     return match ? match.split("=")[1] ?? null : null;
   }
 
-  private authHeaders(): Record<string, string> {
+  private authHeaders(options?: { omitWorkspaceSlug?: boolean }): Record<string, string> {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     const slug = getCurrentSlug();
-    if (slug) headers["X-Workspace-Slug"] = slug;
+    if (slug && !options?.omitWorkspaceSlug) headers["X-Workspace-Slug"] = slug;
     const csrf = this.readCsrfToken();
     if (csrf) headers["X-CSRF-Token"] = csrf;
     const id = this.options.identity;
@@ -440,23 +537,24 @@ export class ApiClient {
   // path, plain text for the attachment-preview proxy, etc.
   private async fetchRaw(
     path: string,
-    init?: RequestInit & { extraHeaders?: Record<string, string> },
+    init?: ApiFetchInit,
   ): Promise<Response> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
+    const { extraHeaders, omitWorkspaceSlug, ...requestInit } = init ?? {};
 
     const headers: Record<string, string> = {
       "X-Request-ID": rid,
-      ...this.authHeaders(),
-      ...(init?.extraHeaders ?? {}),
-      ...((init?.headers as Record<string, string>) ?? {}),
+      ...this.authHeaders({ omitWorkspaceSlug }),
+      ...(extraHeaders ?? {}),
+      ...((requestInit.headers as Record<string, string>) ?? {}),
     };
 
     this.logger.info(`→ ${method} ${path}`, { rid });
 
     const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
+      ...requestInit,
       headers,
       credentials: "include",
     });
@@ -473,7 +571,7 @@ export class ApiClient {
     return res;
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  private async fetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
     const res = await this.fetchRaw(path, {
       ...init,
       extraHeaders: { "Content-Type": "application/json" },
@@ -748,6 +846,98 @@ export class ApiClient {
     });
   }
 
+  async createIssueDraft(data: CreateIssueDraftRequest): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts",
+    }) as IssueDraftBundle;
+  }
+
+  async listIssueDrafts(): Promise<ListIssueDraftSessionsResponse> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts");
+    return parseWithFallback(
+      raw,
+      ListIssueDraftSessionsResponseSchema,
+      EMPTY_LIST_ISSUE_DRAFT_SESSIONS_RESPONSE,
+      { endpoint: "GET /api/issue-drafts" },
+    ) as ListIssueDraftSessionsResponse;
+  }
+
+  async getIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}`);
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "GET /api/issue-drafts/:id",
+    }) as IssueDraftBundle;
+  }
+
+  async getActiveIssueDraft(): Promise<IssueDraftBundle | null> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts/active");
+    if (!raw) return null;
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "GET /api/issue-drafts/active",
+    }) as IssueDraftBundle;
+  }
+
+  async appendIssueDraftMessage(
+    id: string,
+    data: AppendIssueDraftMessageRequest,
+  ): Promise<IssueDraftBundle["messages"][number]> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = raw && typeof raw === "object" && "message" in raw
+      ? (raw as { message?: unknown }).message
+      : raw;
+    return parseWithFallback(
+      parsed,
+      IssueDraftMessageSchema,
+      EMPTY_ISSUE_DRAFT_BUNDLE.messages[0] ?? {
+        id: "",
+        session_id: "",
+        workspace_id: "",
+        author_type: "",
+        author_id: null,
+        message_type: "",
+        content: "",
+        metadata: {},
+        created_at: "",
+      },
+      { endpoint: "POST /api/issue-drafts/:id/messages" },
+    ) as IssueDraftBundle["messages"][number];
+  }
+
+  async delegateIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/delegate`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/delegate",
+    }) as IssueDraftBundle;
+  }
+
+  async generateIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/generate`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/generate",
+    }) as IssueDraftBundle;
+  }
+
+  async confirmIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/confirm`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/confirm",
+    }) as IssueDraftBundle;
+  }
+
+  async cancelIssueDraft(id: string): Promise<IssueDraftBundle> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${id}/cancel`, { method: "POST" });
+    return parseWithFallback(raw, IssueDraftBundleSchema, EMPTY_ISSUE_DRAFT_BUNDLE, {
+      endpoint: "POST /api/issue-drafts/:id/cancel",
+    }) as IssueDraftBundle;
+  }
+
   async createFeedback(data: {
     message: string;
     url?: string;
@@ -781,6 +971,91 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/issues/${id}/children`);
     return parseWithFallback(raw, ChildIssuesResponseSchema, { issues: [] }, {
       endpoint: "GET /api/issues/:id/children",
+    });
+  }
+
+  async getIssueSpec(issueId: string): Promise<SpecIssueContext> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/spec`);
+    return parseWithFallback(raw, SpecIssueContextSchema, EMPTY_SPEC_ISSUE_CONTEXT, {
+      endpoint: "GET /api/issues/:id/spec",
+    });
+  }
+
+  async updateIssueSpecMapping(issueId: string, data: UpdateIssueSpecMappingRequest): Promise<UpdateIssueSpecMappingResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/spec/mapping`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UpdateIssueSpecMappingResponseSchema, EMPTY_UPDATE_ISSUE_SPEC_MAPPING_RESPONSE, {
+      endpoint: "PUT /api/issues/:id/spec/mapping",
+    });
+  }
+
+  async updateIssueSpecState(issueId: string, data: UpdateIssueSpecStateRequest): Promise<UpdateIssueSpecStateResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/spec/state`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UpdateIssueSpecStateResponseSchema, EMPTY_UPDATE_ISSUE_SPEC_STATE_RESPONSE, {
+      endpoint: "PUT /api/issues/:id/spec/state",
+    });
+  }
+
+  async listSpecEpics(): Promise<ListSpecEpicsResponse> {
+    const raw = await this.fetch<unknown>("/api/spec/epics");
+    return parseWithFallback(raw, ListSpecEpicsResponseSchema, EMPTY_LIST_SPEC_EPICS_RESPONSE, {
+      endpoint: "GET /api/spec/epics",
+    });
+  }
+
+  async listSpecModules(epicId: string): Promise<ListSpecModulesResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/epics/${epicId}/modules`);
+    return parseWithFallback(raw, ListSpecModulesResponseSchema, EMPTY_LIST_SPEC_MODULES_RESPONSE, {
+      endpoint: "GET /api/spec/epics/:id/modules",
+    });
+  }
+
+  async listSpecEpicDocuments(epicId: string): Promise<ListSpecDocumentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/epics/${epicId}/documents`);
+    return parseWithFallback(raw, ListSpecDocumentsResponseSchema, EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE, {
+      endpoint: "GET /api/spec/epics/:id/documents",
+    });
+  }
+
+  async listSpecDocuments(moduleId: string): Promise<ListSpecDocumentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/modules/${moduleId}/documents`);
+    return parseWithFallback(raw, ListSpecDocumentsResponseSchema, EMPTY_LIST_SPEC_DOCUMENTS_RESPONSE, {
+      endpoint: "GET /api/spec/modules/:id/documents",
+    });
+  }
+
+  async updateSpecDocument(moduleId: string, docKind: string, data: UpdateSpecDocumentRequest): Promise<UpdateSpecDocumentResponse> {
+    const raw = await this.fetch<unknown>(`/api/spec/modules/${moduleId}/documents/${docKind}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UpdateSpecDocumentResponseSchema, EMPTY_UPDATE_SPEC_DOCUMENT_RESPONSE, {
+      endpoint: "PUT /api/spec/modules/:id/documents/:docKind",
+    });
+  }
+
+  async createSpecDecision(data: CreateSpecDecisionRequest): Promise<CreateSpecDecisionResponse> {
+    const raw = await this.fetch<unknown>("/api/spec/decisions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CreateSpecDecisionResponseSchema, EMPTY_CREATE_SPEC_DECISION_RESPONSE, {
+      endpoint: "POST /api/spec/decisions",
+    });
+  }
+
+  async syncSpecFromFiles(data: SyncSpecFromFilesRequest): Promise<SyncSpecFromFilesResponse> {
+    const raw = await this.fetch<unknown>("/api/spec/sync/from-files", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SyncSpecFromFilesResponseSchema, EMPTY_SYNC_SPEC_FROM_FILES_RESPONSE, {
+      endpoint: "POST /api/spec/sync/from-files",
     });
   }
 
@@ -892,6 +1167,182 @@ export class ApiClient {
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
     return this.fetch("/api/assignee-frequency");
+  }
+
+  async listIssueIntegrations(
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<ListIssueIntegrationsResponse> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-integrations", params),
+      issueBridgeInit(params),
+    );
+    return parseWithFallback(
+      raw,
+      ListIssueIntegrationsResponseSchema,
+      EMPTY_LIST_ISSUE_INTEGRATIONS_RESPONSE,
+      { endpoint: "GET /api/issue-integrations" },
+    );
+  }
+
+  async createGitLabIssueIntegration(
+    data: CreateGitLabIssueIntegrationRequest,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<IssueIntegration> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-integrations/gitlab", params),
+      issueBridgeInit(params, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    );
+    return parseWithFallback(
+      raw,
+      IssueIntegrationResponseSchema,
+      EMPTY_ISSUE_INTEGRATION,
+      { endpoint: "POST /api/issue-integrations/gitlab" },
+    );
+  }
+
+  async updateIssueIntegration(
+    id: string,
+    data: UpdateIssueIntegrationRequest,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<IssueIntegration> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath(`/api/issue-integrations/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    );
+    return parseWithFallback(
+      raw,
+      IssueIntegrationResponseSchema,
+      EMPTY_ISSUE_INTEGRATION,
+      { endpoint: "PUT /api/issue-integrations/:id" },
+    );
+  }
+
+  async deleteIssueIntegration(
+    id: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<void> {
+    await this.fetch(
+      issueBridgePath(`/api/issue-integrations/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, { method: "DELETE" }),
+    );
+  }
+
+  async testIssueIntegration(
+    id: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<TestIssueIntegrationResponse> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath(
+        `/api/issue-integrations/${encodeURIComponent(id)}/test`,
+        params,
+      ),
+      issueBridgeInit(params, { method: "POST" }),
+    );
+    return parseWithFallback(
+      raw,
+      TestIssueIntegrationResponseSchema,
+      EMPTY_TEST_ISSUE_INTEGRATION_RESPONSE,
+      { endpoint: "POST /api/issue-integrations/:id/test" },
+    );
+  }
+
+  async listIssueSyncConfigs(
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<ListIssueSyncConfigsResponse> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-sync-configs", params),
+      issueBridgeInit(params),
+    );
+    return parseWithFallback(
+      raw,
+      ListIssueSyncConfigsResponseSchema,
+      EMPTY_LIST_ISSUE_SYNC_CONFIGS_RESPONSE,
+      { endpoint: "GET /api/issue-sync-configs" },
+    );
+  }
+
+  async createIssueSyncConfig(
+    data: UpsertIssueSyncConfigRequest,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<IssueSyncConfig> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath("/api/issue-sync-configs", params),
+      issueBridgeInit(params, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    );
+    return parseWithFallback(
+      raw,
+      IssueSyncConfigResponseSchema,
+      EMPTY_ISSUE_SYNC_CONFIG,
+      { endpoint: "POST /api/issue-sync-configs" },
+    );
+  }
+
+  async updateIssueSyncConfig(
+    id: string,
+    data: UpsertIssueSyncConfigRequest,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<IssueSyncConfig> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath(`/api/issue-sync-configs/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    );
+    return parseWithFallback(
+      raw,
+      IssueSyncConfigResponseSchema,
+      EMPTY_ISSUE_SYNC_CONFIG,
+      { endpoint: "PUT /api/issue-sync-configs/:id" },
+    );
+  }
+
+  async deleteIssueSyncConfig(
+    id: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<void> {
+    await this.fetch(
+      issueBridgePath(`/api/issue-sync-configs/${encodeURIComponent(id)}`, params),
+      issueBridgeInit(params, { method: "DELETE" }),
+    );
+  }
+
+  /** One-shot import of GitLab issues assigned to the connection owner into a
+   *  project. Requires the project to have a GitLab sync config. Idempotent —
+   *  re-runs skip already-imported issues. Returns per-pass tallies. */
+  async importProjectGitLabIssues(
+    projectId: string,
+    params?: IssueBridgeWorkspaceParams,
+  ): Promise<ProjectGitLabImportResult> {
+    const raw = await this.fetch<unknown>(
+      issueBridgePath(
+        `/api/projects/${encodeURIComponent(projectId)}/gitlab/import-issues`,
+        params,
+      ),
+      issueBridgeInit(params, { method: "POST" }),
+    );
+    // Defensive parse: the tally shape is small and flat; coerce numbers and
+    // cap the errors list so a malformed body can't blow up the UI.
+    const body = (raw ?? {}) as Record<string, unknown>;
+    const errors = Array.isArray(body.errors)
+      ? body.errors.filter((e): e is string => typeof e === "string").slice(0, 20)
+      : [];
+    return {
+      imported: typeof body.imported === "number" ? body.imported : 0,
+      updated: typeof body.updated === "number" ? body.updated : 0,
+      skipped: typeof body.skipped === "number" ? body.skipped : 0,
+      failed: typeof body.failed === "number" ? body.failed : 0,
+      errors,
+    };
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {
@@ -1060,6 +1511,13 @@ export class ApiClient {
     });
   }
 
+  async listAgentLearningReports(agentId: string): Promise<AgentLearningReport[]> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/learning-reports`);
+    return parseWithFallback(raw, AgentLearningReportListSchema, [], {
+      endpoint: "GET /api/agents/:id/learning-reports",
+    });
+  }
+
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
@@ -1099,6 +1557,40 @@ export class ApiClient {
   // surfaces can clear their live cards.
   async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
+  async createAgentLearningReport(
+    data: CreateAgentLearningReportRequest,
+  ): Promise<AgentLearningReport> {
+    const raw = await this.fetch<unknown>("/api/agent-learning-reports", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentLearningReportSchema, EMPTY_AGENT_LEARNING_REPORT, {
+      endpoint: "POST /api/agent-learning-reports",
+    });
+  }
+
+  async getAgentLearningReport(reportId: string): Promise<AgentLearningReport> {
+    const raw = await this.fetch<unknown>(`/api/agent-learning-reports/${reportId}`);
+    return parseWithFallback(raw, AgentLearningReportSchema, EMPTY_AGENT_LEARNING_REPORT, {
+      endpoint: "GET /api/agent-learning-reports/:id",
+    });
+  }
+
+  async applyAgentEvolutionSuggestion(
+    suggestionId: string,
+  ): Promise<AgentEvolutionApplication> {
+    const raw = await this.fetch<unknown>(
+      `/api/agent-evolution-suggestions/${suggestionId}/apply`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      AgentEvolutionApplicationSchema,
+      EMPTY_AGENT_EVOLUTION_APPLICATION,
+      { endpoint: "POST /api/agent-evolution-suggestions/:id/apply" },
+    );
   }
 
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
@@ -1872,6 +2364,22 @@ export class ApiClient {
     });
   }
 
+  async listIssueLearningReports(issueId: string): Promise<AgentLearningReport[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/learning-reports`);
+    return parseWithFallback(raw, AgentLearningReportListSchema, [], {
+      endpoint: "GET /api/issues/:id/learning-reports",
+    });
+  }
+
+  async generateIssueLearningReport(issueId: string): Promise<AgentLearningReport> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/learning-report`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, AgentLearningReportSchema, EMPTY_AGENT_LEARNING_REPORT, {
+      endpoint: "POST /api/issues/:id/learning-report",
+    });
+  }
+
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
@@ -2463,6 +2971,27 @@ export class ApiClient {
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
     }) as Squad;
+  }
+
+  async generateSquadInstructions(id: string, data: GenerateSquadInstructionsRequest = { mode: "template" }): Promise<GenerateSquadInstructionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${id}/instructions/generate`, { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, GenerateSquadInstructionsResponseSchema, EMPTY_GENERATE_SQUAD_INSTRUCTIONS_RESPONSE, {
+      endpoint: "POST /api/squads/:id/instructions/generate",
+    }) as GenerateSquadInstructionsResponse;
+  }
+
+  async createSquadInstructionsGenerationJob(id: string, data: CreateSquadInstructionsGenerationRequest = { mode: "agent_docs" }): Promise<SquadInstructionsGenerationJob> {
+    const raw = await this.fetch<unknown>(`/api/squads/${id}/instructions/generation-jobs`, { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadInstructionsGenerationJobSchema, EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB, {
+      endpoint: "POST /api/squads/:id/instructions/generation-jobs",
+    }) as SquadInstructionsGenerationJob;
+  }
+
+  async getSquadInstructionsGenerationJob(squadId: string, jobId: string): Promise<SquadInstructionsGenerationJob> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/instructions/generation-jobs/${jobId}`);
+    return parseWithFallback(raw, SquadInstructionsGenerationJobSchema, EMPTY_SQUAD_INSTRUCTIONS_GENERATION_JOB, {
+      endpoint: "GET /api/squads/:id/instructions/generation-jobs/:jobId",
+    }) as SquadInstructionsGenerationJob;
   }
 
   async deleteSquad(id: string): Promise<void> {

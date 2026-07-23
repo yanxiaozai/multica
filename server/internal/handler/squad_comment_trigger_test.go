@@ -222,6 +222,74 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 	}
 }
 
+// TestCreateComment_AgentMentionHandoffSkipsSquadLeader drives the production
+// comment path for the common squad workflow: one worker posts a completion
+// comment that explicitly @mentions the next worker. The mentioned worker must
+// receive a task, but the squad leader must not also wake up just to repeat the
+// same handoff.
+func TestCreateComment_AgentMentionHandoffSkipsSquadLeader(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.OtherID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+	var workerTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+		VALUES ($1, $2, $3, 'running', FALSE)
+		RETURNING id
+	`, fx.OtherID, runtimeID, issueID).Scan(&workerTaskID); err != nil {
+		t.Fatalf("seed worker task: %v", err)
+	}
+
+	targetID := createHandlerTestAgent(t, "Squad Handoff Target", nil)
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "已完成本轮检查，交 [@Target](mention://agent/" + targetID + ") 进入下一步。",
+	})
+	r.Header.Set("X-Agent-ID", fx.OtherID)
+	r.Header.Set("X-Task-ID", workerTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaderTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if leaderTasks != 0 {
+		t.Fatalf("after explicit agent handoff: expected 0 queued leader tasks, got %d", leaderTasks)
+	}
+
+	var targetTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, targetID).Scan(&targetTasks); err != nil {
+		t.Fatalf("count target tasks: %v", err)
+	}
+	if targetTasks != 1 {
+		t.Fatalf("after explicit agent handoff: expected 1 queued target task, got %d", targetTasks)
+	}
+}
+
 // TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 // pins the MUL-3879 restored behavior in the new MUL-3794 cascade: an
 // agent-authored worker-result comment on a squad-assigned issue wakes the

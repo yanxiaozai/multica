@@ -225,6 +225,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			MaxConcurrentTasks: 6,
 			OwnerID:            parseUUID(userID),
 			Instructions:       onboardingAssistantInstructions,
+			SpecProfile:        []byte("{}"),
 			CustomEnv:          []byte("{}"),
 			CustomArgs:         []byte("[]"),
 			McpConfig:          nil,

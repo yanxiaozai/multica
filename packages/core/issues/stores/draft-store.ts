@@ -50,9 +50,11 @@ interface IssueDraftStore {
   // choice instead of always opening with no assignee.
   lastAssigneeType?: IssueAssigneeType;
   lastAssigneeId?: string;
+  issueDraftSessionId?: string;
   setDraft: (patch: Partial<IssueDraft>) => void;
   clearDraft: () => void;
   setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
+  setIssueDraftSessionId: (id?: string) => void;
   hasDraft: () => boolean;
 }
 
@@ -62,6 +64,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       draft: { ...EMPTY_DRAFT },
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
+      issueDraftSessionId: undefined,
       setDraft: (patch) =>
         set((s) => ({ draft: { ...s.draft, ...patch } })),
       clearDraft: () =>
@@ -74,6 +77,8 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         })),
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
+      setIssueDraftSessionId: (id) =>
+        set({ issueDraftSessionId: id }),
       hasDraft: () => {
         const { draft } = get();
         return !!(

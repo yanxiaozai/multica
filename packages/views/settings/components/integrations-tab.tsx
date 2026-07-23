@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { GitLabIssuesTab } from "./gitlab-issues-tab";
 import { LarkTab } from "./lark-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
@@ -33,6 +34,9 @@ export function IntegrationsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
+      <SettingsSection title={t(($) => $.issue_bridge.section_title)}>
+        <GitLabIssuesTab />
+      </SettingsSection>
       <SettingsSection title={t(($) => $.lark.section_title)}>
         <LarkTab />
       </SettingsSection>

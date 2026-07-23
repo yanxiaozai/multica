@@ -6,14 +6,17 @@ package execenv
 // flag that once gated it against a legacy verbose brief was retired in
 // MUL-4297, so this is now the only brief).
 //
-// Five kinds, mutually exclusive in practice. classifyTask documents the
+// Six kinds, mutually exclusive in practice. classifyTask documents the
 // tiebreak rule that applies if a future caller accidentally violates the
 // mutex.
 type taskKind int
 
 const (
+	// kindSquadInstructionsGeneration: internal task that summarizes agent
+	// documents into squad.instructions markdown.
+	kindSquadInstructionsGeneration taskKind = iota
 	// kindCommentTriggered: a NEW comment on an issue triggered this run.
-	kindCommentTriggered taskKind = iota
+	kindCommentTriggered
 	// kindAssignmentTriggered: an assignee was set / changed on an issue
 	// and the daemon fired a fresh run for the new assignee.
 	kindAssignmentTriggered
@@ -30,10 +33,12 @@ const (
 // classifyTask maps a TaskContextForEnv to the single taskKind the slim
 // brief should be assembled for. Precedence (documented for the tiebreak
 // case, although the daemon never sets two specific-kind flags at once):
-// chat → quick-create → autopilot run-only → comment-triggered →
-// assignment-triggered.
+// squad-instructions generation → chat → quick-create → autopilot run-only →
+// comment-triggered → assignment-triggered.
 func classifyTask(ctx TaskContextForEnv) taskKind {
 	switch {
+	case ctx.SquadInstructionsGenerationPrompt != "":
+		return kindSquadInstructionsGeneration
 	case ctx.ChatSessionID != "":
 		return kindChat
 	case ctx.QuickCreatePrompt != "":

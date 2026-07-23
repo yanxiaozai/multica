@@ -15,4 +15,5 @@ export {
   useTranscriptViewStore,
   type TranscriptFilterKey,
   type TranscriptSortDirection,
+  type TranscriptViewMode,
 } from "./transcript-view-store";

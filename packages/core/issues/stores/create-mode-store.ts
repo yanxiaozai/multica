@@ -16,7 +16,7 @@ import { useModalStore } from "../../modals";
  * localStorage rather than the workspace-aware StateStorage that scopes
  * per-workspace stores like quick-create-store / draft-store.
  */
-export type CreateMode = "agent" | "manual";
+export type CreateMode = "agent" | "manual" | "squad_draft";
 
 interface CreateModeState {
   lastMode: CreateMode;
@@ -41,12 +41,17 @@ export const useCreateModeStore = create<CreateModeState>()(
  * Generic entry points (sidebar button, command palette, `c` shortcut) call
  * this so the persisted preference actually takes effect; entry points that
  * pre-seed manual-only fields (status, parent_issue_id) keep opening
- * "create-issue" directly because agent mode can't honour those seeds.
+ * "create-issue" directly because agent/squad-draft modes can't honour those seeds.
  */
 export function openCreateIssueWithPreference(
   data?: Record<string, unknown> | null,
 ) {
   const lastMode = useCreateModeStore.getState().lastMode;
-  const modal = lastMode === "manual" ? "create-issue" : "quick-create-issue";
+  const modal =
+    lastMode === "manual"
+      ? "create-issue"
+      : lastMode === "squad_draft"
+        ? "squad-issue-draft"
+        : "quick-create-issue";
   useModalStore.getState().open(modal, data ?? null);
 }

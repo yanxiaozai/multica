@@ -7,6 +7,7 @@ import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Archive,
+  Brain,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -14,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  LibraryBig,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -50,7 +52,7 @@ import type { Attachment, Issue, IssueProperty, IssueStatus, IssuePriority, Time
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useGenerateIssueLearningReport, useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
@@ -61,6 +63,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
+import { IssueSpecPanel } from "../../spec-memory";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -954,6 +957,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [specMemoryOpen, setSpecMemoryOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const githubSettings = useGitHubSettings();
@@ -1566,6 +1570,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  const generateLearningReport = useGenerateIssueLearningReport();
+  const handleGenerateLearningReport = useCallback(async () => {
+    if (!issue) return;
+    try {
+      await generateLearningReport.mutateAsync(issue.id);
+      toast.success(t(($) => $.detail.learning_report_generated));
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t(($) => $.detail.learning_report_failed),
+      );
+    }
+  }, [generateLearningReport, issue, t]);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2011,6 +2029,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${specMemoryOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setSpecMemoryOpen(!specMemoryOpen)}
+        >
+          <LibraryBig className="!size-3 shrink-0" />
+          Spec memory
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${specMemoryOpen ? "rotate-90" : ""}`} />
+        </button>
+        {specMemoryOpen && <div className="pl-2"><IssueSpecPanel issueId={id} /></div>}
+      </div>
+
       {/* Details */}
       <div>
         <button
@@ -2222,6 +2253,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    disabled={generateLearningReport.isPending}
+                    onClick={handleGenerateLearningReport}
+                  >
+                    <Brain />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.detail.generate_learning_report_tooltip)}</TooltipContent>
+            </Tooltip>
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger

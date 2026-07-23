@@ -9,29 +9,22 @@ import {
   ArrowLeftRight,
   ArrowUp,
   CalendarClock,
-  CalendarDays,
   Check,
   ChevronRight,
-  CircleUser,
-  FolderKanban,
+  Clock3,
+  Copy,
   Maximize2,
+  MessageSquareText,
   Minimize2,
   MoreHorizontal,
-  Settings2,
-  Shapes,
-  Tag,
+  Sparkles,
+  Trash2,
+  Users,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type {
-  Issue,
-  IssueStatus,
-  IssuePriority,
-  IssueAssigneeType,
-  IssuePropertyValue,
-  Attachment,
-} from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment, IssueDraftSession } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
@@ -42,18 +35,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
-import { useShortcut } from "@multica/core/shortcuts";
-import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -63,31 +51,23 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
-import {
-  useIssueCreateSettingsStore,
-  type ManualCreateField,
-} from "@multica/core/issues/stores/issue-create-settings-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useAttachLabelToIssue } from "@multica/core/labels";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useCreateIssueDraft, useAppendIssueDraftMessage, useDelegateIssueDraft, useGenerateIssueDraft, useConfirmIssueDraft, useCancelIssueDraft } from "@multica/core/issue-drafts/mutations";
+import { issueDraftListQueryOptions, issueDraftQueryOptions } from "@multica/core/issue-drafts/queries";
+import { squadListOptions } from "@multica/core/workspace/queries";
 import {
-  propertyListOptions,
-  useSetIssueProperty,
-} from "@multica/core/properties";
-import {
+  api,
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
   parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
-import { PropertyIcon } from "../common/property-icon";
-import {
-  CustomPropertyValueDisplay,
-  CustomPropertyValueInput,
-} from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -189,7 +169,7 @@ function CreateRunHint({
             <ActorAvatar
               actorType={avatarType}
               actorId={avatarId}
-              size="sm"
+              size="xs"
               profileLink={false}
             />
           )}
@@ -203,6 +183,7 @@ function CreateRunHint({
 export function ManualCreatePanel({
   onClose,
   onSwitchMode,
+  onSwitchSquadDraft,
   data,
   isExpanded,
   setIsExpanded,
@@ -210,6 +191,7 @@ export function ManualCreatePanel({
   onClose: () => void;
   /** Called with the carry payload to seed the agent panel after switch. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  onSwitchSquadDraft?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
   /** Lifted to the shell so DialogContent's mode-aware className can react
    *  without the body itself having to live inside DialogContent (which would
@@ -218,7 +200,6 @@ export function ManualCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
-  const { t: tEditor } = useT("editor");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
@@ -230,22 +211,16 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
-  const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
-  const sendShortcut = useShortcut("send");
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
-  const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
-  const [priority, setPriority] = useState<IssuePriority>(
-    (data?.priority as IssuePriority | undefined) ?? draft.priority,
-  );
+  const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
@@ -259,18 +234,10 @@ export function ManualCreatePanel({
     return draft.assigneeId;
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
-  const [dueDate, setDueDate] = useState<string | null>(
-    (data?.due_date as string | undefined) ?? draft.dueDate,
+  const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [projectId, setProjectId] = useState<string | undefined>(
+    (data?.project_id as string) || undefined,
   );
-  const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
-  const [propertyValues, setPropertyValues] = useState(draft.propertyValues ?? {});
-  const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | undefined>(() => {
-    if (data && "project_id" in data) {
-      return (data.project_id as string | null) ?? undefined;
-    }
-    return draft.projectId;
-  });
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -280,24 +247,11 @@ export function ManualCreatePanel({
     typeof data?.stage === "number" ? (data.stage as number) : null,
   );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
-  // Toolbar fields hidden via Settings → Issue reuse the overflow reveal
-  // pattern: the ⋯ menu item flips this open, which mounts the inline pill
-  // (the popover's anchor) AND opens the picker. Closing without a value
-  // unmounts the pill again; a field holding a non-default value always
-  // renders regardless of the setting so nothing applied is ever invisible.
-  const [fieldPickerOpen, setFieldPickerOpen] = useState<Exclude<
-    ManualCreateField,
-    "due_date" | "start_date"
-  > | null>(null);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
-  // Due date follows the same overflow pattern as start date: collapsed into
-  // the ⋯ menu by default, mounted inline (as the popover anchor) only when it
-  // has a value or the user just opened it from the menu.
-  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -305,7 +259,6 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
-  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -335,11 +288,7 @@ export function ManualCreatePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { uploadWithToast } = useEditorUpload();
-  // Gate every action that fixes this draft: Create and the switch to agent
-  // mode (which re-serializes the description into a
-  // prompt and would carry a stripped body across).
-  const uploadGate = useUploadGate(descEditorRef);
+  const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -361,53 +310,17 @@ export function ManualCreatePanel({
     setAssigneeType(type); setAssigneeId(id);
     setDraft({ assigneeType: type, assigneeId: id });
   };
-  const updateProject = (id?: string) => { setProjectId(id); setDraft({ projectId: id }); };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
-  const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
-  const updatePropertyValue = (propertyId: string, value: IssuePropertyValue | undefined) => {
-    const next = { ...propertyValues };
-    if (value === undefined) delete next[propertyId];
-    else next[propertyId] = value;
-    setPropertyValues(next);
-    setDraft({ propertyValues: next });
-  };
-
-  // Inline pill reveal per toolbar field: kept by Settings → Issue, holding a
-  // non-default value (a hidden field with a value must stay visible — the
-  // draft or a mode-switch carry may have set it), or just opened from the ⋯
-  // overflow (the picker popover needs the inline pill as its anchor).
-  const showField = {
-    status: manualFields.includes("status") || status !== "todo" || fieldPickerOpen === "status",
-    priority: manualFields.includes("priority") || priority !== "none" || fieldPickerOpen === "priority",
-    assignee: manualFields.includes("assignee") || assigneeId != null || fieldPickerOpen === "assignee",
-    labels: manualFields.includes("labels") || labelIds.length > 0 || fieldPickerOpen === "labels",
-    project: manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
-    due_date: manualFields.includes("due_date") || dueDate !== null || dueDatePickerOpen,
-    start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
-  };
-
-  // Field visibility lives in Settings → Issue; the modal closes first so the
-  // dialog doesn't linger over the settings page. The draft store already
-  // holds everything typed, so nothing is lost across the round-trip.
-  const openFieldSettings = () => {
-    onClose();
-    router.push(`${p.settings()}?tab=issue`);
-  };
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
-  const attachLabelMutation = useAttachLabelToIssue();
-  const setIssuePropertyMutation = useSetIssueProperty();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
-    setLabelIds([]);
-    setPropertyValues({});
-    setCustomPropertyPickerId(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
     setStage(null);
@@ -419,11 +332,8 @@ export function ManualCreatePanel({
       priority: "none",
       assigneeType,
       assigneeId,
-      projectId: undefined,
       startDate: null,
       dueDate: null,
-      labelIds: [],
-      propertyValues: {},
       attachments: [],
     });
     descEditorRef.current?.clearContent();
@@ -431,19 +341,7 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    // Single-flight on a ref, not `submitting`: two shortcut presses in one
-    // tick both read the pre-update state and would each fire a create. The
-    // ref flips synchronously, so the second press loses the race.
-    if (submittingRef.current) return;
-    if (!title.trim()) {
-      // The shortcut paths bypass the button entirely, so an empty title would
-      // otherwise be a silent no-op. Put the caret where the fix is; the
-      // button's tooltip says the rest.
-      titleEditorRef.current?.focus();
-      return;
-    }
-    if (uploadGate.isBlocked()) return;
-    submittingRef.current = true;
+    if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -460,45 +358,11 @@ export function ManualCreatePanel({
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
-        // The server attaches these in the same transaction as the create and
-        // echoes them back as `issue.labels`, so a stale selection fails the
-        // create instead of leaving a committed-but-unlabeled issue. A legacy
-        // backend that predates this ignores the field — handled by the
-        // compatibility fallback below.
-        label_ids: labelIds.length > 0 ? labelIds : undefined,
         parent_issue_id: parentIssueId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
-
-      // Custom-property values can only be addressed once the issue has an
-      // id. Keep the modal in its submitting state until every value settles
-      // so closing or "Create another" cannot race the fan-out.
-      const propertyEntries = Object.entries(propertyValues);
-      if (propertyEntries.length > 0) {
-        const results = await Promise.allSettled(
-          propertyEntries.map(([propertyId, value]) =>
-            setIssuePropertyMutation.mutateAsync({
-              issueId: issue.id,
-              propertyId,
-              value,
-            }),
-          ),
-        );
-        let failed = 0;
-        for (const result of results) {
-          if (result.status === "rejected") {
-            failed += 1;
-            console.error("[create-issue] custom property set failed", result.reason);
-          }
-        }
-        if (failed > 0) {
-          toast.error(
-            t(($) => $.create_issue.toast_set_properties_failed, { count: failed }),
-          );
-        }
-      }
 
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't
@@ -531,32 +395,6 @@ export function ManualCreatePanel({
                   total: childIssues.length,
                 }),
           );
-        }
-      }
-
-      // Backend-compatibility fallback for the rolling deploy window: the web
-      // app auto-deploys on merge but the backend deploys manually, so a newer
-      // web build can briefly talk to a backend that predates atomic label
-      // creation. That backend silently ignores `label_ids` and returns an
-      // issue with no `labels` field. Only then do we fall back to the legacy
-      // per-label attach so the user's labels aren't silently dropped. When
-      // `labels` is present (current backend) the atomic path already ran, so
-      // we skip this — no double-write, no per-label fan-out.
-      if (labelIds.length > 0 && issue.labels === undefined) {
-        const results = await Promise.allSettled(
-          labelIds.map((labelId) =>
-            attachLabelMutation.mutateAsync({ issueId: issue.id, labelId }),
-          ),
-        );
-        let labelsFailed = 0;
-        for (const result of results) {
-          if (result.status === "rejected") {
-            labelsFailed += 1;
-            console.error("[create-issue] label attach fallback failed", result.reason);
-          }
-        }
-        if (labelsFailed > 0) {
-          toast.error(t(($) => $.create_issue.toast_link_labels_failed));
         }
       }
 
@@ -648,7 +486,6 @@ export function ManualCreatePanel({
           : t(($) => $.create_issue.toast_failed),
       );
     } finally {
-      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -669,10 +506,6 @@ export function ManualCreatePanel({
   // needs it so the new issue is still created as a sub-issue when the user
   // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
-    // Serializing mid-upload packs a description that has already lost the
-    // pending image into the agent prompt, and the draft it came from is
-    // cleared below — the file would be unrecoverable.
-    if (uploadGate.isBlocked()) return;
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
     // Title + description have been packed into the agent prompt — clear them
@@ -697,65 +530,21 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
-      ...(priority !== "none" ? { priority } : {}),
-      ...(dueDate ? { due_date: dueDate } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
   };
 
-  // One state for the button and the keyboard paths, so a rendered affordance
-  // can never disagree with what `handleSubmit` will actually do.
-  const submitState: "submitting" | "uploading" | "missing_title" | "ready" =
-    submitting
-      ? "submitting"
-      : uploadGate.uploading
-        ? "uploading"
-        : !title.trim()
-          ? "missing_title"
-          : "ready";
-  const submitBusy = submitState === "submitting" || submitState === "uploading";
-
-  // Built once and reused by both footer branches: rendering a separate Button
-  // per branch is how the keycaps drifted out of one of them before.
-  const createButton = (
-    <Button
-      size="sm"
-      onClick={handleSubmit}
-      // Native `disabled` for the transient busy states, but `aria-disabled`
-      // for a missing title — a native-disabled button is not focusable, so
-      // keyboard and screen-reader users could never reach the tooltip that
-      // explains why nothing happens. `handleSubmit` is the real gate either way.
-      disabled={submitBusy}
-      aria-disabled={submitState === "missing_title" || undefined}
-      aria-busy={submitBusy || undefined}
-      // The Button base only dims/blocks on native `disabled`, so aria-disabled
-      // would otherwise stay a fully lit, pressable-looking primary button.
-      // Deliberately no `pointer-events-none`: this control still has to hover
-      // its tooltip and take the click that focuses the title.
-      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
-    >
-      {submitState === "submitting" ? (
-        t(($) => $.create_issue.submitting)
-      ) : submitState === "uploading" ? (
-        tEditor(($) => $.upload.in_progress)
-      ) : (
-        <>
-          {t(($) => $.create_issue.submit)}
-          {/* Decorative: the accessible name must stay "Create Issue", not
-              "Create Issue Command Enter". Absent when `send` is unbound. */}
-          {sendShortcut ? (
-            <ShortcutKeycaps
-              shortcut={sendShortcut}
-              decorative
-              className="ml-1"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
-            />
-          ) : null}
-        </>
-      )}
-    </Button>
-  );
+  const switchToSquadDraft = () => {
+    const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
+    const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
+    setLastMode("squad_draft");
+    onSwitchSquadDraft?.({
+      prompt,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(assigneeId && assigneeType === "squad" ? { squad_id: assigneeId } : {}),
+    });
+  };
 
   return (
     <>
@@ -808,14 +597,12 @@ export function ManualCreatePanel({
             <div className="px-5 pb-2 shrink-0">
               <TitleEditor
                 key={formResetKey}
-                ref={titleEditorRef}
                 autoFocus
                 defaultValue={draft.title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
-                // Chord only — plain Enter still just ends title editing (#5532).
-                onSubmitShortcut={handleSubmit}
+                onSubmit={handleSubmit}
               />
             </div>
 
@@ -826,9 +613,7 @@ export function ManualCreatePanel({
                 defaultValue={draft.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setDraft({ description: md })}
-                onSubmit={handleSubmit}
                 onUploadFile={handleUpload}
-                onUploadingChange={uploadGate.onUploadingChange}
                 debounceMs={500}
                 attachments={draftAttachments}
               />
@@ -839,75 +624,51 @@ export function ManualCreatePanel({
                 when an agent assignee will pick the issue up. */}
             <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
 
-            {/* Property toolbar — each field renders per the Settings → Issue
-                selection (see showField above). */}
+            {/* Property toolbar */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
               {/* Status */}
-              {showField.status && (
-                <StatusPicker
-                  status={status}
-                  onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
-                  triggerRender={<PillButton />}
-                  align="start"
-                  open={fieldPickerOpen === "status" ? true : undefined}
-                  onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
-                />
-              )}
+              <StatusPicker
+                status={status}
+                onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
 
               {/* Priority */}
-              {showField.priority && (
-                <PriorityPicker
-                  priority={priority}
-                  onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
-                  triggerRender={<PillButton />}
-                  align="start"
-                  open={fieldPickerOpen === "priority" ? true : undefined}
-                  onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
-                />
-              )}
+              <PriorityPicker
+                priority={priority}
+                onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
 
               {/* Assignee */}
-              {showField.assignee && (
-                <AssigneePicker
-                  assigneeType={assigneeType ?? null}
-                  assigneeId={assigneeId ?? null}
-                  onUpdate={(u) => updateAssignee(
-                    u.assignee_type ?? undefined,
-                    u.assignee_id ?? undefined,
-                  )}
-                  triggerRender={<PillButton />}
-                  align="start"
-                  open={fieldPickerOpen === "assignee" ? true : undefined}
-                  onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
-                />
-              )}
+              <AssigneePicker
+                assigneeType={assigneeType ?? null}
+                assigneeId={assigneeId ?? null}
+                onUpdate={(u) => updateAssignee(
+                  u.assignee_type ?? undefined,
+                  u.assignee_id ?? undefined,
+                )}
+                triggerRender={<PillButton />}
+                align="start"
+              />
 
-              {/* Labels — occupies the slot that used to hold Due date so the
-                  add-label entry is exposed directly on the dialog. Draft mode:
-                  selection is local until the issue is created (handleSubmit
-                  attaches the labels afterward). */}
-              {showField.labels && (
-                <LabelPicker
-                  selectedIds={labelIds}
-                  onSelectedIdsChange={updateLabelIds}
-                  triggerRender={<PillButton />}
-                  align="start"
-                  open={fieldPickerOpen === "labels" ? true : undefined}
-                  onOpenChange={(open) => setFieldPickerOpen(open ? "labels" : null)}
-                />
-              )}
+              {/* Due date */}
+              <DueDatePicker
+                dueDate={dueDate}
+                onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
 
               {/* Project */}
-              {showField.project && (
-                <ProjectPicker
-                  projectId={projectId ?? null}
-                  onUpdate={(u) => updateProject(u.project_id ?? undefined)}
-                  triggerRender={<PillButton />}
-                  align="start"
-                  open={fieldPickerOpen === "project" ? true : undefined}
-                  onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
-                />
-              )}
+              <ProjectPicker
+                projectId={projectId ?? null}
+                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
 
               {/* Stage — only relevant when creating a sub-issue under a parent */}
               {parentIssueId && (
@@ -921,12 +682,11 @@ export function ManualCreatePanel({
               )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
-                  a low-frequency field (exposable via Settings → Issue).
-                  Renders inline when configured visible, when the field has a
-                  value, OR when the user just opened it from the overflow
+                  a low-frequency field. Renders inline only when the field
+                  has a value OR the user just opened it from the overflow
                   menu (the picker's calendar popover needs the inline pill
                   as its anchor). */}
-              {showField.start_date && (
+              {(startDate || startDatePickerOpen) && (
                 <StartDatePicker
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
@@ -936,56 +696,6 @@ export function ManualCreatePanel({
                   onOpenChange={setStartDatePickerOpen}
                 />
               )}
-
-              {/* Due date — collapsed into the ⋯ menu by default (moved off
-                  the toolbar to make room for Labels). Same reveal rule as
-                  start date. */}
-              {showField.due_date && (
-                <DueDatePicker
-                  dueDate={dueDate}
-                  onUpdate={(u) => updateDueDate(u.due_date ?? null)}
-                  triggerRender={<PillButton />}
-                  align="start"
-                  open={dueDatePickerOpen}
-                  onOpenChange={setDueDatePickerOpen}
-                />
-              )}
-
-              {/* Workspace-defined fields use the same typed editors as issue
-                  detail, but write into the persisted draft until creation. */}
-              {workspaceProperties
-                .filter(
-                  (property) =>
-                    Object.prototype.hasOwnProperty.call(propertyValues, property.id) ||
-                    customPropertyPickerId === property.id,
-                )
-                .map((property) => {
-                  const value = propertyValues[property.id];
-                  return (
-                    <CustomPropertyValueInput
-                      key={property.id}
-                      property={property}
-                      value={value}
-                      onChange={(next) => updatePropertyValue(property.id, next)}
-                      open={customPropertyPickerId === property.id}
-                      onOpenChange={(open) =>
-                        setCustomPropertyPickerId(open ? property.id : null)
-                      }
-                      triggerRender={<PillButton />}
-                      trigger={
-                        <>
-                          <PropertyIcon property={property} className="size-3.5 text-xs" />
-                          <span className="max-w-32 truncate">{property.name}</span>
-                          {value !== undefined && (
-                            <span className="max-w-40 truncate text-muted-foreground">
-                              <CustomPropertyValueDisplay property={property} value={value} />
-                            </span>
-                          )}
-                        </>
-                      }
-                    />
-                  );
-                })}
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
@@ -1048,46 +758,7 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
-                  {/* Re-entry points for toolbar fields hidden via
-                      Settings → Issue. Listed in toolbar order; each opens
-                      the picker inline (mounting the pill as its anchor). */}
-                  {!showField.status && (
-                    <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
-                      <StatusIcon status={status} className="h-3.5 w-3.5" />
-                      {t(($) => $.create_issue.set_status)}
-                    </DropdownMenuItem>
-                  )}
-                  {!showField.priority && (
-                    <DropdownMenuItem onClick={() => setFieldPickerOpen("priority")}>
-                      <PriorityIcon priority="none" className="h-3.5 w-3.5" />
-                      {t(($) => $.create_issue.set_priority)}
-                    </DropdownMenuItem>
-                  )}
-                  {!showField.assignee && (
-                    <DropdownMenuItem onClick={() => setFieldPickerOpen("assignee")}>
-                      <CircleUser className="h-3.5 w-3.5" />
-                      {t(($) => $.create_issue.set_assignee)}
-                    </DropdownMenuItem>
-                  )}
-                  {!showField.labels && (
-                    <DropdownMenuItem onClick={() => setFieldPickerOpen("labels")}>
-                      <Tag className="h-3.5 w-3.5" />
-                      {t(($) => $.create_issue.set_labels)}
-                    </DropdownMenuItem>
-                  )}
-                  {!showField.project && (
-                    <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
-                      <FolderKanban className="h-3.5 w-3.5" />
-                      {t(($) => $.create_issue.set_project)}
-                    </DropdownMenuItem>
-                  )}
-                  {!showField.due_date && (
-                    <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
-                      <CalendarDays className="h-3.5 w-3.5" />
-                      {t(($) => $.create_issue.set_due_date)}
-                    </DropdownMenuItem>
-                  )}
-                  {!showField.start_date && (
+                  {!startDate && (
                     <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
                       <CalendarClock className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.set_start_date)}
@@ -1107,38 +778,6 @@ export function ManualCreatePanel({
                   <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
                     <ArrowDown className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.add_subissue)}
-                  </DropdownMenuItem>
-                  {workspaceProperties.length > 0 && (
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>
-                        <Shapes className="h-3.5 w-3.5" />
-                        {t(($) => $.create_issue.custom_properties)}
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent className="w-56">
-                        {workspaceProperties.map((property) => (
-                          <DropdownMenuItem
-                            key={property.id}
-                            disabled={Object.prototype.hasOwnProperty.call(
-                              propertyValues,
-                              property.id,
-                            )}
-                            onClick={() => setCustomPropertyPickerId(property.id)}
-                          >
-                            <PropertyIcon property={property} className="size-3.5 text-xs" />
-                            <span className="truncate">{property.name}</span>
-                            {Object.prototype.hasOwnProperty.call(
-                              propertyValues,
-                              property.id,
-                            ) && <Check className="ml-auto size-3.5" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={openFieldSettings}>
-                    <Settings2 className="h-3.5 w-3.5" />
-                    {t(($) => $.create_issue.customize_fields)}
                   </DropdownMenuItem>
                   {parentIssueId && parentIssue && (
                     <>
@@ -1191,7 +830,6 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
-                  multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
@@ -1199,14 +837,20 @@ export function ManualCreatePanel({
                 <button
                   type="button"
                   onClick={switchToAgent}
-                  disabled={uploadGate.uploading}
-                  aria-disabled={uploadGate.uploading || undefined}
-                  aria-busy={uploadGate.uploading || undefined}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
+                </button>
+                <button
+                  type="button"
+                  onClick={switchToSquadDraft}
+                  title={t(($) => $.create_issue.issue_draft.switch_tooltip)}
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Users className="size-3.5 text-brand/80" />
+                  {t(($) => $.create_issue.issue_draft.switch)}
                 </button>
                 <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
                   <Switch
@@ -1216,21 +860,567 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
-                {submitState === "missing_title" ? (
+                {!title.trim() ? (
                   <TooltipProvider delay={200}>
                     <Tooltip>
-                      {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                          button focusable and hoverable, so it can anchor its own
-                          tooltip. */}
-                      <TooltipTrigger render={createButton} />
+                      <TooltipTrigger render={<span><Button size="sm" onClick={handleSubmit} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
                       <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  createButton
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  </Button>
                 )}
               </div>
             </div>
+    </>
+  );
+}
+
+function formatDraftTime(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function draftStatusTone(status: string) {
+  if (status === "failed") return "text-destructive";
+  if (status === "ready_for_review" || status === "creating") return "text-emerald-600";
+  if (status === "delegating" || status === "drafting") return "text-brand";
+  return "text-muted-foreground";
+}
+
+function firstLine(value: string) {
+  return value.split("\n").find((line) => line.trim())?.trim() ?? "";
+}
+
+export function SquadIssueDraftPanel({
+  onClose,
+  onSwitchManual,
+  onSwitchAgent,
+  data,
+}: {
+  onClose: () => void;
+  onSwitchManual?: (carry?: Record<string, unknown> | null) => void;
+  onSwitchAgent?: (carry?: Record<string, unknown> | null) => void;
+  data?: Record<string, unknown> | null;
+}) {
+  const { t } = useT("modals");
+  const workspaceName = useCurrentWorkspace()?.name;
+  const wsId = useWorkspaceId();
+  const { getActorName } = useActorName();
+  const issueDraftSessionId = useIssueDraftStore((s) => s.issueDraftSessionId);
+  const setIssueDraftSessionId = useIssueDraftStore((s) => s.setIssueDraftSessionId);
+  const setLastMode = useCreateModeStore((s) => s.setLastMode);
+
+  const [projectId, setProjectId] = useState<string | undefined>(
+    (data?.project_id as string | undefined) ?? undefined,
+  );
+  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(
+    data?.squad_id ? "squad" : undefined,
+  );
+  const [squadId, setSquadId] = useState<string | undefined>(
+    (data?.squad_id as string | undefined) ?? undefined,
+  );
+  const [initialMessage, setInitialMessage] = useState(
+    (data?.prompt as string | undefined) ?? "",
+  );
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(
+    issueDraftSessionId ?? null,
+  );
+  const [reply, setReply] = useState("");
+  const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null);
+  const [deletedDraftIds, setDeletedDraftIds] = useState<string[]>([]);
+  const [expandedArtifactIds, setExpandedArtifactIds] = useState<string[]>([]);
+
+  const { data: draftList } = useQuery(issueDraftListQueryOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const selectedSquadId = assigneeType === "squad" ? squadId : undefined;
+  const selectedSquad = squads.find((s) => s.id === selectedSquadId);
+  const sessions = (draftList?.sessions ?? []).filter(
+    (session) => !deletedDraftIds.includes(session.id),
+  );
+
+  useEffect(() => {
+    if (selectedDraftId) return;
+    const stored = issueDraftSessionId
+      ? sessions.find((session) => session.id === issueDraftSessionId)
+      : undefined;
+    const next = stored ?? sessions[0];
+    if (next) {
+      setSelectedDraftId(next.id);
+      setIssueDraftSessionId(next.id);
+    }
+  }, [issueDraftSessionId, selectedDraftId, sessions, setIssueDraftSessionId]);
+
+  const { data: draftBundle } = useQuery({
+    ...issueDraftQueryOptions(wsId, selectedDraftId ?? ""),
+    enabled: Boolean(wsId && selectedDraftId),
+    refetchInterval: (query) =>
+      query.state.data?.member_tasks.some((task) =>
+        task.status === "queued" || task.status === "running",
+      )
+        ? 2000
+        : false,
+  });
+
+  const createIssueDraftMutation = useCreateIssueDraft();
+  const appendIssueDraftMessage = useAppendIssueDraftMessage(selectedDraftId ?? "");
+  const delegateIssueDraft = useDelegateIssueDraft(selectedDraftId ?? "");
+  const generateIssueDraft = useGenerateIssueDraft(selectedDraftId ?? "");
+  const confirmIssueDraft = useConfirmIssueDraft(selectedDraftId ?? "");
+  const cancelIssueDraft = useCancelIssueDraft();
+
+  const activeTask = draftBundle?.member_tasks.find((task) =>
+    task.status === "queued" || task.status === "running",
+  );
+  const canStart = Boolean(projectId && selectedSquadId);
+  const startHint = !projectId
+    ? t(($) => $.create_issue.issue_draft.hint_project)
+    : !selectedSquadId
+      ? t(($) => $.create_issue.issue_draft.hint_squad)
+      : t(($) => $.create_issue.issue_draft.hint_ready);
+
+  const switchToManual = () => {
+    setLastMode("manual");
+    onSwitchManual?.({
+      title: "",
+      description: initialMessage,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(selectedSquadId ? { assignee_type: "squad", assignee_id: selectedSquadId } : {}),
+    });
+  };
+
+  const switchToAgent = () => {
+    setLastMode("agent");
+    onSwitchAgent?.({
+      prompt: initialMessage,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(selectedSquadId ? { squad_id: selectedSquadId } : {}),
+    });
+  };
+
+  const selectDraft = (session: IssueDraftSession) => {
+    setSelectedDraftId(session.id);
+    setIssueDraftSessionId(session.id);
+  };
+
+  const startIssueDraft = async () => {
+    if (!canStart || !projectId || !selectedSquadId) return;
+    const bundle = await createIssueDraftMutation.mutateAsync({
+      project_id: projectId,
+      squad_id: selectedSquadId,
+      initial_message:
+        initialMessage.trim() || t(($) => $.create_issue.issue_draft.default_initial_message),
+    });
+    setSelectedDraftId(bundle.session.id);
+    setIssueDraftSessionId(bundle.session.id);
+    toast.success(t(($) => $.create_issue.issue_draft.toast_started));
+  };
+
+  const appendReply = async () => {
+    if (!selectedDraftId || !reply.trim()) return;
+    await appendIssueDraftMessage.mutateAsync({ content: reply.trim() });
+    setReply("");
+  };
+
+  const confirmDraft = async () => {
+    if (!selectedDraftId) return;
+    const bundle = await confirmIssueDraft.mutateAsync();
+    if (bundle.session.status === "created") {
+      setSelectedDraftId(null);
+      setIssueDraftSessionId(undefined);
+    }
+  };
+
+  const toggleArtifact = (id: string) => {
+    setExpandedArtifactIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const copyArtifact = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success(t(($) => $.create_issue.issue_draft.toast_copied));
+    } catch {
+      toast.error(t(($) => $.create_issue.issue_draft.toast_copy_failed));
+    }
+  };
+
+  const deleteDraft = async (session: IssueDraftSession) => {
+    if (deletingDraftId) return;
+    setDeletingDraftId(session.id);
+    try {
+      await cancelIssueDraft.mutateAsync(session.id);
+      const next = sessions.find((candidate) => candidate.id !== session.id);
+      setDeletedDraftIds((prev) =>
+        prev.includes(session.id) ? prev : [...prev, session.id],
+      );
+      if (selectedDraftId === session.id) {
+        setSelectedDraftId(next?.id ?? null);
+        setIssueDraftSessionId(next?.id);
+      }
+      toast.success(t(($) => $.create_issue.issue_draft.toast_deleted));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.create_issue.issue_draft.toast_delete_failed),
+      );
+    } finally {
+      setDeletingDraftId(null);
+    }
+  };
+
+  const renderDraftListItem = (session: IssueDraftSession) => {
+    const isSelected = session.id === selectedDraftId;
+    const squadName = getActorName("squad", session.squad_id);
+    const isDeleting = deletingDraftId === session.id;
+    return (
+      <div
+        key={session.id}
+        className={cn(
+          "flex w-full items-stretch overflow-hidden rounded-md border transition-colors",
+          isSelected ? "border-brand/50 bg-brand/10" : "bg-background hover:bg-accent/60",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => selectDraft(session)}
+          className="min-w-0 flex-1 px-3 py-2 text-left"
+        >
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="truncate font-medium">{squadName}</span>
+            <span className={cn("shrink-0", draftStatusTone(session.status))}>
+              {session.status}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+            <Clock3 className="size-3" />
+            <span>{formatDraftTime(session.updated_at || session.created_at)}</span>
+          </div>
+        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => deleteDraft(session)}
+                disabled={isDeleting}
+                className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t(($) => $.create_issue.issue_draft.delete)}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            }
+          />
+          <TooltipContent side="right">
+            {isDeleting
+              ? t(($) => $.create_issue.issue_draft.deleting)
+              : t(($) => $.create_issue.issue_draft.delete)}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <DialogTitle className="sr-only">{t(($) => $.create_issue.issue_draft.sr_title)}</DialogTitle>
+
+      <div className="flex items-center justify-between border-b px-5 py-3 shrink-0">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs">
+          <span className="truncate text-muted-foreground">{workspaceName}</span>
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" />
+          <span className="shrink-0 font-medium">{t(($) => $.create_issue.issue_draft.breadcrumb)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={switchToManual}>
+            {t(($) => $.create_issue.switch_to_manual)}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={switchToAgent}>
+            {t(($) => $.create_issue.switch_to_agent)}
+          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                >
+                  <XIcon className="size-4" />
+                </button>
+              }
+            />
+            <TooltipContent side="bottom">{t(($) => $.common.close)}</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className="min-h-0 border-b bg-muted/20 p-3 md:border-b-0 md:border-r">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs font-medium">{t(($) => $.create_issue.issue_draft.drafts)}</div>
+            <span className="text-[0.6875rem] text-muted-foreground">{sessions.length}</span>
+          </div>
+          <div className="grid max-h-40 gap-2 overflow-y-auto pr-1 md:max-h-full">
+            {sessions.length === 0 ? (
+              <div className="rounded-md border border-dashed bg-background/60 px-3 py-8 text-center text-xs text-muted-foreground">
+                {t(($) => $.create_issue.issue_draft.no_drafts)}
+              </div>
+            ) : (
+              sessions.map(renderDraftListItem)
+            )}
+          </div>
+        </aside>
+
+        <section className="flex min-h-0 flex-col">
+          <div className="grid gap-3 border-b p-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <ProjectPicker
+                projectId={projectId ?? null}
+                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+              <AssigneePicker
+                assigneeType={assigneeType ?? null}
+                assigneeId={squadId ?? null}
+                onUpdate={(u) => {
+                  const nextType = u.assignee_type ?? undefined;
+                  setAssigneeType(nextType);
+                  setSquadId(nextType === "squad" ? (u.assignee_id ?? undefined) : undefined);
+                }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+              <Button
+                size="sm"
+                onClick={startIssueDraft}
+                disabled={!canStart || createIssueDraftMutation.isPending}
+              >
+                {createIssueDraftMutation.isPending
+                  ? t(($) => $.create_issue.issue_draft.starting)
+                  : t(($) => $.create_issue.issue_draft.start)}
+              </Button>
+            </div>
+            <Textarea
+              value={initialMessage}
+              onChange={(e) => setInitialMessage(e.target.value)}
+              placeholder={t(($) => $.create_issue.issue_draft.initial_placeholder)}
+              className="min-h-20 resize-none text-sm"
+            />
+            <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
+              <Users className="size-3" />
+              <span className="truncate">
+                {selectedSquad ? `${selectedSquad.name} · ${startHint}` : startHint}
+              </span>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {!selectedDraftId ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                {t(($) => $.create_issue.issue_draft.select_or_start)}
+              </div>
+            ) : !draftBundle ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                {t(($) => $.create_issue.issue_draft.loading)}
+              </div>
+            ) : (
+              <div className="mx-auto grid max-w-3xl gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">
+                      {getActorName("squad", draftBundle.session.squad_id)}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {activeTask
+                        ? t(($) => $.create_issue.issue_draft.current_owner, {
+                            name: getActorName("agent", activeTask.agent_id),
+                            status: activeTask.status,
+                          })
+                        : t(($) => $.create_issue.issue_draft.status_line, {
+                            status: draftBundle.session.status,
+                          })}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => delegateIssueDraft.mutateAsync()}
+                      disabled={!selectedDraftId || delegateIssueDraft.isPending || !!activeTask}
+                    >
+                      {activeTask || delegateIssueDraft.isPending
+                        ? t(($) => $.create_issue.issue_draft.delegating)
+                        : t(($) => $.create_issue.issue_draft.delegate)}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => generateIssueDraft.mutateAsync()}
+                      disabled={!selectedDraftId || generateIssueDraft.isPending}
+                    >
+                      <Sparkles className="size-3.5" />
+                      {t(($) => $.create_issue.issue_draft.generate)}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={confirmDraft}
+                      disabled={!selectedDraftId || confirmIssueDraft.isPending}
+                    >
+                      {t(($) => $.create_issue.issue_draft.confirm)}
+                    </Button>
+                  </div>
+                </div>
+
+                {draftBundle.member_tasks.length > 0 && (
+                  <div className="grid gap-1 rounded-md border px-3 py-2 text-xs">
+                    {draftBundle.member_tasks.map((task) => (
+                      <div key={task.id} className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <ActorAvatar
+                            actorType="agent"
+                            actorId={task.agent_id}
+                            size="sm"
+                            profileLink={false}
+                          />
+                          <span className="truncate">{getActorName("agent", task.agent_id)}</span>
+                        </div>
+                        <span className={cn("shrink-0", draftStatusTone(task.status))}>
+                          {task.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid gap-2">
+                  {draftBundle.messages.length === 0 ? (
+                    <div className="rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground">
+                      {t(($) => $.create_issue.issue_draft.no_messages)}
+                    </div>
+                  ) : (
+                    draftBundle.messages.map((msg) => (
+                      <div key={msg.id} className="rounded-md border bg-background px-3 py-2 text-sm">
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                          <span className="font-medium">
+                            {msg.author_type === "agent" && msg.author_id
+                              ? getActorName("agent", msg.author_id)
+                              : msg.author_type}
+                          </span>
+                          <span className="text-muted-foreground">{msg.message_type}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap text-muted-foreground">{msg.content}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {draftBundle.artifacts.length > 0 && (
+                  <div className="grid gap-2 rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-xs font-medium">
+                      <MessageSquareText className="size-3.5" />
+                      {t(($) => $.create_issue.issue_draft.artifacts)}
+                    </div>
+                    {draftBundle.artifacts.slice(0, 4).map((artifact) => {
+                      const expanded = expandedArtifactIds.includes(artifact.id);
+                      return (
+                        <div key={artifact.id} className="grid gap-2 rounded border bg-muted/10 p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleArtifact(artifact.id)}
+                              className="flex min-w-0 items-center gap-1.5 text-left font-medium hover:text-foreground"
+                              aria-expanded={expanded}
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  "size-3 shrink-0 transition-transform",
+                                  expanded && "rotate-90",
+                                )}
+                              />
+                              <span className="truncate">
+                                {artifact.artifact_type} v{artifact.revision}
+                              </span>
+                            </button>
+                            <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
+                              <span>{formatDraftTime(artifact.created_at)}</span>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <button
+                                      type="button"
+                                      onClick={() => copyArtifact(artifact.content)}
+                                      className="rounded-sm p-1 transition-colors hover:bg-accent hover:text-foreground"
+                                      aria-label={t(($) => $.create_issue.issue_draft.copy_artifact)}
+                                    >
+                                      <Copy className="size-3.5" />
+                                    </button>
+                                  }
+                                />
+                                <TooltipContent side="left">
+                                  {t(($) => $.create_issue.issue_draft.copy_artifact)}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                          {expanded ? (
+                            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-background p-3 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
+                              {artifact.content}
+                            </pre>
+                          ) : (
+                            <p className="truncate text-muted-foreground">{firstLine(artifact.content)}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {draftBundle.confirm_steps.length > 0 && (
+                  <div className="grid gap-1 rounded-md border px-3 py-2 text-xs">
+                    {draftBundle.confirm_steps.map((step) => (
+                      <div key={step.step} className="flex items-center justify-between gap-2">
+                        <span className="truncate">{step.step}</span>
+                        <span className={draftStatusTone(step.status)}>{step.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 gap-2 border-t p-4">
+            <Textarea
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              placeholder={t(($) => $.create_issue.issue_draft.reply_placeholder)}
+              className="min-h-10 flex-1 resize-none text-sm"
+              disabled={!selectedDraftId}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={appendReply}
+              disabled={!selectedDraftId || !reply.trim() || appendIssueDraftMessage.isPending}
+            >
+              {t(($) => $.create_issue.issue_draft.send)}
+            </Button>
+          </div>
+        </section>
+      </div>
     </>
   );
 }

@@ -42,7 +42,9 @@ Important consequences:
 - assigning an issue to a squad routes to the leader;
 - mentioning a squad routes to the leader;
 - squad-assigned autopilot resolves to the leader;
-- squad members are not automatically fanned out;
+- squad members are not automatically fanned out by the backend;
+- the leader briefing requires the leader to identify independent work packages
+  and delegate parallel lanes explicitly when work can proceed concurrently;
 - squad `instructions` are leader briefing content, not member prompts.
 
 ## CLI
@@ -74,6 +76,11 @@ multica squad activity <issue-id> action|no_action|failed --reason "<why>" --out
 
 `activity` is a write: it records the leader's evaluation decision on an issue.
 Use it only when acting as the squad leader after evaluating a trigger.
+`no_action` means the leader evaluated the trigger and found no next squad step.
+`failed` means the leader could not route the next step inside the squad. When
+the issue is already `in_progress` and no other task remains active, either
+terminal outcome moves it to `in_review` so a human can review the completed
+work, blocker, or remaining release decision.
 
 Issue/comment commands often needed with squads:
 
@@ -145,6 +152,15 @@ members carry no skills segment. Builtin `multica-*` skills are not listed —
 only the workspace skills explicitly attached to the agent. Archived agent
 members are skipped from the briefing roster.
 
+The operating protocol requires the leader to check whether the next step is
+one task or several independent work packages before delegating. When work can
+proceed in parallel without shared dependencies or file/state conflicts, the
+leader should delegate each parallel lane in the same turn, either with one
+concise comment containing separate member mentions or with one child issue per
+assignee when separate tracking is useful. Sequential gates such as review,
+design audit, testing, and final acceptance should wait for the implementation
+or evidence they depend on.
+
 ## Issue assignment behavior
 
 Issues can be assigned to squads with:
@@ -191,7 +207,8 @@ Squad mention format:
 
 Current behavior: resolve the squad, read `leader_id`, enqueue a leader task,
 and use the current comment as the trigger comment. It does not enqueue every
-squad member.
+squad member. Any member fan-out comes from the leader's explicit delegation,
+not from the initial squad mention itself.
 
 ## Autopilot behavior
 

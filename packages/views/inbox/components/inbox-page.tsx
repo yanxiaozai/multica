@@ -22,6 +22,7 @@ import {
   useArchiveAllInbox,
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
+  isMissingInboxItemError,
 } from "@multica/core/inbox/mutations";
 
 import { IssueDetail } from "../../issues/components";
@@ -225,14 +226,19 @@ export function InboxPage() {
   useEffect(() => {
     if (!selectedId || selectedRead) return;
     markReadMutate(selectedId, {
-      onError: (err) =>
+      onError: (err) => {
+        if (isMissingInboxItemError(err)) {
+          setSelectedKey("");
+          return;
+        }
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.errors.mark_read_failed),
-        ),
+        );
+      },
     });
-  }, [selectedId, selectedRead, markReadMutate, t]);
+  }, [selectedId, selectedRead, markReadMutate, t, setSelectedKey]);
 
   const handleSelect = (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
@@ -255,14 +261,21 @@ export function InboxPage() {
   };
 
   const handleArchive = (id: string) => {
+    const target = items.find((i) => i.id === id);
+    const wasSelected = !!target && (target.issue_id ?? target.id) === selectedKey;
     advanceSelectionPast(id, items);
     archiveMutation.mutate(id, {
-      onError: (err) =>
+      onError: (err) => {
+        if (isMissingInboxItemError(err)) {
+          if (wasSelected) setSelectedKey("");
+          return;
+        }
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.errors.archive_failed),
-        ),
+        );
+      },
     });
   };
 

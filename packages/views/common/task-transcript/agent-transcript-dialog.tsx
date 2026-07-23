@@ -17,6 +17,7 @@ import {
   Cloud,
   Cpu,
   Filter,
+  FileText,
   Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
@@ -34,13 +35,8 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
-import { AttributionBadge } from "../../issues/components/attribution-badge";
 import { api } from "@multica/core/api";
-import {
-  useTranscriptViewStore,
-  type TranscriptFilterKey,
-  type TranscriptSortDirection,
-} from "@multica/core/agents/stores";
+import { useTranscriptViewStore, type TranscriptSortDirection, type TranscriptViewMode } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
@@ -65,6 +61,9 @@ interface AgentTranscriptDialogProps {
 // ─── Color mapping for timeline segments ────────────────────────────────────
 
 type EventColor = "agent" | "thinking" | "tool" | "result" | "error";
+type ChangedFileSummary = { path: string; sourceSeq: number };
+
+const MAX_CHANGED_FILE_SUMMARY = 20;
 
 function getEventColor(item: TimelineItem): EventColor {
   switch (item.type) {
@@ -110,12 +109,6 @@ function getEventLabel(item: TimelineItem): string {
   }
 }
 
-function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
-  return item.tool && (item.type === "tool_use" || item.type === "tool_result")
-    ? `tool:${item.tool}`
-    : item.type;
-}
-
 function getEventSummary(item: TimelineItem): string {
   switch (item.type) {
     case "text":
@@ -153,16 +146,6 @@ function getEventSummary(item: TimelineItem): string {
   }
 }
 
-function hasEventDetail(item: TimelineItem): boolean {
-  return (
-    (item.type === "tool_use" && !!item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && !!item.output && item.output.length > 0) ||
-    (item.type === "thinking" && !!item.content && item.content.length > 0) ||
-    (item.type === "text" && !!item.content && item.content.length > 0) ||
-    (item.type === "error" && !!item.content && item.content.length > 0)
-  );
-}
-
 function shortenPath(p: string): string {
   const parts = p.split("/");
   if (parts.length <= 3) return p;
@@ -186,6 +169,106 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}m ${secs}s`;
 }
 
+function normalizePathCandidate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 240) return null;
+  if (/[\n\r{}]/.test(trimmed)) return null;
+  if (trimmed === "/dev/null") return null;
+  return trimmed.replace(/^["']|["']$/g, "");
+}
+
+function collectInputPaths(input: Record<string, unknown> | undefined): string[] {
+  if (!input) return [];
+  const paths: string[] = [];
+  const pathKeys = ["path", "file_path", "filepath", "file", "filename", "target_file", "destination_path"];
+  for (const key of pathKeys) {
+    const value = input[key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const path = normalizePathCandidate(item);
+        if (path) paths.push(path);
+      }
+      continue;
+    }
+    const path = normalizePathCandidate(value);
+    if (path) paths.push(path);
+  }
+  return paths;
+}
+
+function isLikelyMutatingTool(item: TimelineItem): boolean {
+  const tool = item.tool?.toLowerCase() ?? "";
+  if (/(write|edit|patch|apply|create|delete|remove|rename|move|update)/.test(tool)) return true;
+  const input = item.input ?? {};
+  return ["old_string", "new_string", "oldText", "newText", "content", "patch", "edits"].some((key) => key in input);
+}
+
+function extractPatchPaths(text: string | undefined): string[] {
+  if (!text) return [];
+  const paths: string[] = [];
+  const patterns = [
+    /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm,
+    /^\+\+\+ (?!\/dev\/null$)(?:b\/)?(.+)$/gm,
+    /^--- (?!\/dev\/null$)(?:a\/)?(.+)$/gm,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const path = normalizePathCandidate(match[1]);
+      if (path) paths.push(path);
+    }
+  }
+  return paths;
+}
+
+function extractChangedFiles(items: TimelineItem[]): ChangedFileSummary[] {
+  const seen = new Set<string>();
+  const files: ChangedFileSummary[] = [];
+  const add = (path: string, sourceSeq: number) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    files.push({ path, sourceSeq });
+  };
+
+  for (const item of items) {
+    if (item.type === "tool_use" && isLikelyMutatingTool(item)) {
+      for (const path of collectInputPaths(item.input)) add(path, item.seq);
+      for (const value of Object.values(item.input ?? {})) {
+        if (typeof value === "string") {
+          for (const path of extractPatchPaths(value)) add(path, item.seq);
+        }
+      }
+    }
+    if (item.type === "tool_result") {
+      for (const path of extractPatchPaths(item.output)) add(path, item.seq);
+    }
+    if (files.length >= MAX_CHANGED_FILE_SUMMARY) break;
+  }
+
+  return files;
+}
+
+function formatRawTranscriptText(items: TimelineItem[], changedFiles: ChangedFileSummary[]): string {
+  const lines: string[] = [];
+  for (const item of items) {
+    if (item.type === "text" && item.content) {
+      lines.push(item.content.trimEnd());
+    } else if (item.type === "thinking" && item.content) {
+      lines.push(`[Thinking]\n${item.content.trimEnd()}`);
+    } else if (item.type === "tool_use") {
+      lines.push(`[Tool: ${item.tool ?? "tool"}] ${getEventSummary(item)}`);
+    } else if (item.type === "tool_result" && item.output) {
+      lines.push(`[Tool result: ${item.tool ?? "tool"}]\n${item.output.trimEnd()}`);
+    } else if (item.type === "error" && item.content) {
+      lines.push(`[Error]\n${item.content.trimEnd()}`);
+    }
+  }
+  if (changedFiles.length > 0) {
+    lines.push("", "Changed files:", ...changedFiles.map((file) => `- ${file.path}`));
+  }
+  return lines.filter((line, index, arr) => line !== "" || arr[index - 1] !== "").join("\n\n");
+}
+
 // ─── Main dialog ────────────────────────────────────────────────────────────
 
 export function AgentTranscriptDialog({
@@ -204,24 +287,13 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
-  const [sessionFilterKeys, setSessionFilterKeys] = useState<TranscriptFilterKey[]>([]);
-  const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(() => new Set());
+  const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
-  const preserveFilters = useTranscriptViewStore((s) => s.preserveFilters);
-  const setPreserveFilters = useTranscriptViewStore((s) => s.setPreserveFilters);
-  const persistedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
-  const setPersistedFilterKeys = useTranscriptViewStore((s) => s.setSelectedFilterKeys);
-  const togglePersistedFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
-  const clearPersistedFilterKeys = useTranscriptViewStore((s) => s.clearFilterKeys);
-  const defaultExpanded = useTranscriptViewStore((s) => s.defaultExpanded);
-  const setDefaultExpanded = useTranscriptViewStore((s) => s.setDefaultExpanded);
+  const viewMode = useTranscriptViewStore((s) => s.viewMode);
+  const setViewMode = useTranscriptViewStore((s) => s.setViewMode);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const autoExpandedSeqsRef = useRef<Set<number>>(new Set());
-  const initializedTaskRef = useRef<string | null>(null);
-  const previousDefaultExpandedRef = useRef(defaultExpanded);
-  const selectedFilterKeys = preserveFilters ? persistedFilterKeys : sessionFilterKeys;
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
@@ -229,76 +301,40 @@ export function AgentTranscriptDialog({
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const item of items) {
-      const key = getItemFilterKey(item);
       if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
+        const key = `tool:${item.tool}`;
         if (!options.has(key)) options.set(key, key);
       } else {
-        if (!options.has(key)) {
-          options.set(key, getEventLabel(item));
+        const value = item.type;
+        if (!options.has(value)) {
+          options.set(value, getEventLabel(item));
         }
       }
     }
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [items]);
 
-  const filterOptionKeys = useMemo(
-    () => new Set(filterOptions.map(([value]) => value)),
-    [filterOptions],
-  );
-
-  const activeFilterKeys = useMemo(
-    () => selectedFilterKeys.filter((key) => filterOptionKeys.has(key)),
-    [selectedFilterKeys, filterOptionKeys],
-  );
-
-  const activeFilterSet = useMemo(() => new Set(activeFilterKeys), [activeFilterKeys]);
+  // Resolve filter key for each item — mirrors filterOptions derivation exactly
+  const itemFilterKey = (item: TimelineItem) =>
+    item.tool && (item.type === "tool_use" || item.type === "tool_result")
+      ? `tool:${item.tool}`
+      : item.type;
 
   // Strict filter
   const filteredItems = useMemo(() => {
-    if (activeFilterSet.size === 0) return items;
-    return items.filter((item) => activeFilterSet.has(getItemFilterKey(item)));
-  }, [items, activeFilterSet]);
+    if (selectedTools.size === 0) return items;
+    return items.filter((item) => selectedTools.has(itemFilterKey(item)));
+  }, [items, selectedTools]);
 
   // Apply user-chosen sort direction. Reverse is a pure presentation concern —
   // the underlying timeline (and its seq numbers) is untouched, so copy/filter
   // and segment navigation continue to work against the same data.
+  const activeItems = viewMode === "events" ? filteredItems : items;
   const displayItems = useMemo(
-    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
-    [filteredItems, sortDirection],
+    () => (sortDirection === "newest_first" ? [...activeItems].reverse() : activeItems),
+    [activeItems, sortDirection],
   );
-  const isAntigravityLiveEmpty =
-    isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
-
-  const detailSeqs = useMemo(
-    () => displayItems.filter(hasEventDetail).map((item) => item.seq),
-    [displayItems],
-  );
-
-  const allVisibleDetailsExpanded =
-    detailSeqs.length > 0 && detailSeqs.every((seq) => expandedSeqs.has(seq));
-
-  useEffect(() => {
-    const switchedDefaultOn =
-      defaultExpanded && previousDefaultExpandedRef.current !== defaultExpanded;
-    previousDefaultExpandedRef.current = defaultExpanded;
-
-    if (initializedTaskRef.current !== task.id || switchedDefaultOn) {
-      initializedTaskRef.current = task.id;
-      autoExpandedSeqsRef.current = new Set(defaultExpanded ? detailSeqs : []);
-      setExpandedSeqs(defaultExpanded ? new Set(detailSeqs) : new Set());
-      return;
-    }
-
-    if (!defaultExpanded) return;
-
-    const unseen = detailSeqs.filter((seq) => !autoExpandedSeqsRef.current.has(seq));
-    if (unseen.length === 0) return;
-
-    for (const seq of unseen) {
-      autoExpandedSeqsRef.current.add(seq);
-    }
-    setExpandedSeqs((prev) => new Set([...prev, ...unseen]));
-  }, [task.id, defaultExpanded, detailSeqs]);
+  const changedFiles = useMemo(() => extractChangedFiles(items), [items]);
 
   // Toggling direction is a manual user action; jump the scroll container back
   // to the top so the newest end of the timeline (per the chosen direction) is
@@ -361,84 +397,34 @@ export function AgentTranscriptDialog({
   }, [task.relative_work_dir]);
 
   const handleCopyAll = useCallback(() => {
-    const text = displayItems
-      .map((item) => {
-        const label = getEventLabel(item);
-        const summary = getEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
-      .join("\n");
+    const text = viewMode === "raw"
+      ? formatRawTranscriptText(displayItems, changedFiles)
+      : displayItems
+        .map((item) => {
+          const label = getEventLabel(item);
+          const summary = getEventSummary(item);
+          return `[${label}] ${summary}`;
+        })
+        .join("\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [displayItems]);
+  }, [changedFiles, displayItems, viewMode]);
 
-  const toggleSessionFilterKey = useCallback((key: TranscriptFilterKey) => {
-    setSessionFilterKeys((prev) => {
+  // Toggle tool filter
+  const toggleTool = useCallback((tool: string) => {
+    setSelectedTools((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return Array.from(next);
+      if (next.has(tool)) next.delete(tool);
+      else next.add(tool);
+      return next;
     });
   }, []);
 
   const clearFilters = useCallback(() => {
-    if (preserveFilters) {
-      clearPersistedFilterKeys();
-      return;
-    }
-    setSessionFilterKeys([]);
-  }, [clearPersistedFilterKeys, preserveFilters]);
-
-  const toggleFilterKey = useCallback(
-    (key: TranscriptFilterKey) => {
-      if (preserveFilters) {
-        togglePersistedFilterKey(key);
-        return;
-      }
-      toggleSessionFilterKey(key);
-    },
-    [preserveFilters, togglePersistedFilterKey, toggleSessionFilterKey],
-  );
-
-  const handlePreserveFiltersChange = useCallback(
-    (next: boolean) => {
-      if (next) {
-        setPersistedFilterKeys(sessionFilterKeys);
-      } else {
-        setSessionFilterKeys(persistedFilterKeys);
-      }
-      setPreserveFilters(next);
-    },
-    [persistedFilterKeys, sessionFilterKeys, setPersistedFilterKeys, setPreserveFilters],
-  );
-
-  const handleToggleVisibleExpanded = useCallback(() => {
-    for (const seq of detailSeqs) {
-      autoExpandedSeqsRef.current.add(seq);
-    }
-    setExpandedSeqs((prev) => {
-      if (allVisibleDetailsExpanded) {
-        const next = new Set(prev);
-        for (const seq of detailSeqs) {
-          next.delete(seq);
-        }
-        return next;
-      }
-      return new Set([...prev, ...detailSeqs]);
-    });
-  }, [allVisibleDetailsExpanded, detailSeqs]);
-
-  const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
-    autoExpandedSeqsRef.current.add(seq);
-    setExpandedSeqs((prev) => {
-      const next = new Set(prev);
-      if (expanded) next.add(seq);
-      else next.delete(seq);
-      return next;
-    });
+    setSelectedTools(new Set());
   }, []);
 
   // Duration
@@ -450,30 +436,25 @@ export function AgentTranscriptDialog({
         : null;
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
-  const copyTranscriptLabel = copied
-    ? t(($) => $.transcript.copied)
-    : activeFilterKeys.length > 0
-      ? t(($) => $.transcript.copy_filtered)
-      : t(($) => $.transcript.copy_all);
 
   // Status display
   const statusBadge = isLive ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
+    <span className="inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
       <Loader2 className="h-3 w-3 animate-spin" />
       {t(($) => $.transcript.status_running)}
     </span>
   ) : task.status === "completed" ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+    <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
       <CheckCircle2 className="h-3 w-3" />
       {t(($) => $.transcript.status_completed)}
     </span>
   ) : task.status === "failed" ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
+    <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
       <XCircle className="h-3 w-3" />
       {t(($) => $.transcript.status_failed)}
     </span>
   ) : (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
       {task.status}
     </span>
   );
@@ -489,48 +470,30 @@ export function AgentTranscriptDialog({
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="border-b px-4 py-3 shrink-0 space-y-2">
           {/* Top row: agent name, status, actions */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {task.agent_id ? (
                 <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" />
               ) : (
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
+                <div className="flex items-center justify-center h-6 w-6 rounded-full bg-info/10 text-info">
                   <Bot className="h-3.5 w-3.5" />
                 </div>
               )}
-              <span className="truncate font-medium text-sm">{agentName}</span>
+              <span className="font-medium text-sm">{agentName}</span>
             </div>
 
             {statusBadge}
 
-            {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
-            <AttributionBadge attribution={task.attribution} className="shrink-0" />
-
-            <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto">
-              {detailSeqs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleToggleVisibleExpanded}
-                  aria-label={
-                    allVisibleDetailsExpanded
-                      ? t(($) => $.transcript.collapse_visible)
-                      : t(($) => $.transcript.expand_visible)
-                  }
-                  className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <ChevronRight
-                    className={cn(
-                      "h-3 w-3 transition-transform",
-                      !allVisibleDetailsExpanded && "rotate-90",
-                    )}
-                  />
-                  <span className="hidden sm:inline">
-                    {allVisibleDetailsExpanded
-                      ? t(($) => $.transcript.collapse_visible)
-                      : t(($) => $.transcript.expand_visible)}
-                  </span>
-                </button>
-              )}
+            <div className="ml-auto flex items-center gap-1">
+              <ViewModeToggle
+                value={viewMode}
+                onChange={setViewMode}
+                labels={{
+                  events: t(($) => $.transcript.view_events),
+                  raw: t(($) => $.transcript.view_raw),
+                  ariaLabel: t(($) => $.transcript.view_label),
+                }}
+              />
               {items.length > 1 && (
                 <SortDirectionToggle
                   value={sortDirection}
@@ -542,22 +505,21 @@ export function AgentTranscriptDialog({
                   }}
                 />
               )}
-              {filterOptions.length > 0 && (
+              {viewMode === "events" && filterOptions.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    aria-label={t(($) => $.transcript.filter)}
                     className={cn(
-                      "flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
-                      activeFilterKeys.length > 0
+                      "flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
+                      selectedTools.size > 0
                         ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
                         : "text-muted-foreground hover:text-foreground hover:bg-accent",
                     )}
                   >
                     <Filter className="h-3 w-3" />
-                    <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
-                    {activeFilterKeys.length > 0 && (
+                    {t(($) => $.transcript.filter)}
+                    {selectedTools.size > 0 && (
                       <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
-                        {activeFilterKeys.length}
+                        {selectedTools.size}
                       </span>
                     )}
                   </DropdownMenuTrigger>
@@ -565,26 +527,13 @@ export function AgentTranscriptDialog({
                     {filterOptions.map(([value, label]) => (
                       <DropdownMenuCheckboxItem
                         key={value}
-                        checked={selectedFilterKeys.includes(value)}
-                        onCheckedChange={() => toggleFilterKey(value)}
+                        checked={selectedTools.has(value)}
+                        onCheckedChange={() => toggleTool(value)}
                       >
                         {label}
                       </DropdownMenuCheckboxItem>
                     ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuCheckboxItem
-                      checked={preserveFilters}
-                      onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
-                    >
-                      {t(($) => $.transcript.preserve_filters)}
-                    </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem
-                      checked={defaultExpanded}
-                      onCheckedChange={(checked) => setDefaultExpanded(checked === true)}
-                    >
-                      {t(($) => $.transcript.default_expanded)}
-                    </DropdownMenuCheckboxItem>
-                    {selectedFilterKeys.length > 0 && (
+                    {selectedTools.size > 0 && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
@@ -598,16 +547,15 @@ export function AgentTranscriptDialog({
               <button
                 type="button"
                 onClick={handleCopyAll}
-                aria-label={copyTranscriptLabel}
-                className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                <span className="hidden sm:inline">{copyTranscriptLabel}</span>
+                {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
               </button>
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
-                className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -652,7 +600,7 @@ export function AgentTranscriptDialog({
               <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
             )}
             <MetadataChip>
-              {activeFilterKeys.length > 0
+              {viewMode === "events" && selectedTools.size > 0
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
@@ -697,7 +645,7 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
-        {displayItems.length > 0 && (
+        {viewMode === "events" && displayItems.length > 0 && (
           <div className="border-b px-4 py-2.5 shrink-0">
             <TimelineBar
               items={displayItems}
@@ -721,12 +669,7 @@ export function AgentTranscriptDialog({
         >
           {displayItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              {isAntigravityLiveEmpty ? (
-                <div className="flex max-w-md items-center gap-2 px-4 text-center">
-                  <Clock className="h-4 w-4 shrink-0" />
-                  {t(($) => $.transcript.antigravity_live_unavailable)}
-                </div>
-              ) : isLive ? (
+              {isLive ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   {t(($) => $.transcript.waiting_events)}
@@ -736,21 +679,23 @@ export function AgentTranscriptDialog({
               )}
             </div>
           ) : (
-            <div className="divide-y">
-              {displayItems.map((item) => (
-                <TranscriptEventRow
-                  key={item.seq}
-                  ref={(el) => {
-                    if (el) eventRefs.current.set(item.seq, el);
-                    else eventRefs.current.delete(item.seq);
-                  }}
-                  item={item}
-                  isSelected={selectedSeq === item.seq}
-                  expanded={expandedSeqs.has(item.seq)}
-                  onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
-                />
-              ))}
-            </div>
+            viewMode === "raw" ? (
+              <RawTranscriptView items={displayItems} changedFiles={changedFiles} />
+            ) : (
+              <div className="divide-y">
+                {displayItems.map((item) => (
+                  <TranscriptEventRow
+                    key={item.seq}
+                    ref={(el) => {
+                      if (el) eventRefs.current.set(item.seq, el);
+                      else eventRefs.current.delete(item.seq);
+                    }}
+                    item={item}
+                    isSelected={selectedSeq === item.seq}
+                  />
+                ))}
+              </div>
+            )
           )}
         </div>
       </DialogContent>
@@ -771,7 +716,7 @@ function SortDirectionToggle({ value, onChange, labels }: SortDirectionTogglePro
     <div
       role="group"
       aria-label={labels.ariaLabel}
-      className="inline-flex shrink-0 items-center rounded border bg-muted/40 p-0.5 text-xs"
+      className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
     >
       <button
         type="button"
@@ -896,17 +841,14 @@ function TimelineBar({
 interface TranscriptEventRowProps {
   item: TimelineItem;
   isSelected: boolean;
-  expanded: boolean;
-  onExpandedChange: (expanded: boolean) => void;
 }
 
 const TranscriptEventRow = ({
   ref,
   item,
   isSelected,
-  expanded,
-  onExpandedChange,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
+  const [expanded, setExpanded] = useState(false);
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
@@ -915,7 +857,12 @@ const TranscriptEventRow = ({
     [item.created_at],
   );
 
-  const hasDetail = hasEventDetail(item);
+  const hasDetail =
+    (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
+    (item.type === "tool_result" && item.output && item.output.length > 0) ||
+    (item.type === "thinking" && item.content && item.content.length > 0) ||
+    (item.type === "text" && item.content && item.content.length > 0) ||
+    (item.type === "error" && item.content && item.content.length > 0);
 
   return (
     <div
@@ -925,7 +872,7 @@ const TranscriptEventRow = ({
         isSelected && "bg-accent/50",
       )}
     >
-      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
+      <Collapsible open={expanded} onOpenChange={setExpanded}>
         <div className="flex items-start gap-2 px-4 py-2">
           {/* Type label badge */}
           <span
@@ -992,6 +939,171 @@ const TranscriptEventRow = ({
     </div>
   );
 };
+
+interface ViewModeToggleProps {
+  value: TranscriptViewMode;
+  onChange: (mode: TranscriptViewMode) => void;
+  labels: { events: string; raw: string; ariaLabel: string };
+}
+
+function ViewModeToggle({ value, onChange, labels }: ViewModeToggleProps) {
+  return (
+    <div
+      role="group"
+      aria-label={labels.ariaLabel}
+      className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "events"}
+        title={labels.events}
+        onClick={() => onChange("events")}
+        className={cn(
+          "rounded px-1.5 py-0.5 transition-colors",
+          value === "events"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {labels.events}
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "raw"}
+        title={labels.raw}
+        onClick={() => onChange("raw")}
+        className={cn(
+          "rounded px-1.5 py-0.5 transition-colors",
+          value === "raw"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {labels.raw}
+      </button>
+    </div>
+  );
+}
+
+function RawTranscriptView({
+  items,
+  changedFiles,
+}: {
+  items: TimelineItem[];
+  changedFiles: ChangedFileSummary[];
+}) {
+  const { t } = useT("agents");
+
+  return (
+    <div className="space-y-4 px-5 py-4">
+      {items.map((item) => {
+        if (item.type === "text") return <RawTextBlock key={item.seq} item={item} />;
+        if (item.type === "thinking") return <RawThinkingBlock key={item.seq} item={item} />;
+        if (item.type === "tool_use") return <RawToolBlock key={item.seq} item={item} />;
+        if (item.type === "tool_result") return <RawToolResultBlock key={item.seq} item={item} />;
+        return <RawErrorBlock key={item.seq} item={item} />;
+      })}
+
+      {changedFiles.length > 0 && (
+        <section className="rounded-md border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <FileText className="h-3.5 w-3.5" />
+            {t(($) => $.transcript.changed_files)}
+          </div>
+          <div className="space-y-1">
+            {changedFiles.map((file) => (
+              <div key={file.path} className="font-mono text-xs text-foreground">
+                {file.path}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function RawTextBlock({ item }: { item: TimelineItem }) {
+  if (!item.content) return null;
+  return (
+    <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+      {item.content}
+    </pre>
+  );
+}
+
+function RawThinkingBlock({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  if (!item.content) return null;
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex items-center gap-1.5 rounded text-xs font-medium text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3 w-3" />
+        <Brain className="h-3 w-3" />
+        {t(($) => $.transcript.thinking)}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-2 max-h-60 overflow-auto rounded border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+          {item.content}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function RawToolBlock({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  const summary = getEventSummary(item);
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex max-w-full items-center gap-1.5 rounded text-xs text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span className="font-medium">{item.tool ?? t(($) => $.transcript.tool)}</span>
+        {summary && <span className="truncate font-mono">{summary}</span>}
+      </CollapsibleTrigger>
+      {item.input && Object.keys(item.input).length > 0 && (
+        <CollapsibleContent>
+          <pre className="mt-2 max-h-60 overflow-auto rounded border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-all">
+            {redactSecrets(JSON.stringify(item.input, null, 2))}
+          </pre>
+        </CollapsibleContent>
+      )}
+    </Collapsible>
+  );
+}
+
+function RawToolResultBlock({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  if (!item.output) return null;
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex max-w-full items-center gap-1.5 rounded text-xs text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span className="font-medium">{t(($) => $.transcript.tool_result, { tool: item.tool ?? t(($) => $.transcript.tool) })}</span>
+        <span className="truncate">{item.output.slice(0, 160)}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-2 max-h-80 overflow-auto rounded border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-all">
+          {item.output.length > 4000
+            ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
+            : redactSecrets(item.output)}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function RawErrorBlock({ item }: { item: TimelineItem }) {
+  if (!item.content) return null;
+  return (
+    <pre className="rounded border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive whitespace-pre-wrap break-words">
+      {item.content}
+    </pre>
+  );
+}
 
 // ─── Event detail content ───────────────────────────────────────────────────
 

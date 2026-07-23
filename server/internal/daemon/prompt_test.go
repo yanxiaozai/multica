@@ -244,11 +244,15 @@ func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
 		},
 	}
 	out := BuildPrompt(task, "claude")
-	if !strings.Contains(out, "Squad leader no_action rule") {
-		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for member-triggered comments, got:\n%s", out)
-	}
-	if !strings.Contains(out, "DO NOT post any comment") {
-		t.Errorf("buildCommentPrompt must contain DO NOT post prohibition for member-triggered squad leader, got:\n%s", out)
+	for _, want := range []string{
+		"Squad leader rule",
+		"delegate to the best squad member",
+		"Do NOT edit files",
+		"DO NOT post a comment saying \"no action needed\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("buildCommentPrompt must contain squad leader guard %q, got:\n%s", want, out)
+		}
 	}
 }
 
@@ -266,8 +270,8 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 		},
 	}
 	out := BuildPrompt(task, "claude")
-	if !strings.Contains(out, "Squad leader no_action rule") {
-		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for agent-triggered comments, got:\n%s", out)
+	if !strings.Contains(out, "Squad leader rule") {
+		t.Errorf("buildCommentPrompt must inject squad leader rule for agent-triggered comments, got:\n%s", out)
 	}
 }
 
@@ -581,6 +585,35 @@ func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
 	}
 	if strings.Contains(out, "multica issue comment list issue-default-1 --output json") {
 		t.Errorf("default BuildPrompt still presents the unbounded flat read as the assignment catch-up command\n--- output ---\n%s", out)
+	}
+}
+
+func TestBuildPromptSquadLeaderAssignmentDelegatesOnly(t *testing.T) {
+	out := BuildPrompt(Task{
+		IssueID: "issue-squad-1",
+		Agent: &AgentData{
+			Name:         "boss",
+			Instructions: "## Squad Operating Protocol\n\nYou are the LEADER.",
+		},
+	}, "claude")
+
+	for _, want := range []string{
+		"act only as the squad leader",
+		"delegate with the exact mention markdown",
+		"multica squad activity issue-squad-1 action",
+		"Do NOT implement the issue yourself",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad leader assignment prompt missing %q\n---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{
+		"then complete it",
+		"move the issue to `in_review`",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("squad leader assignment prompt must not contain %q\n---\n%s", bad, out)
+		}
 	}
 }
 

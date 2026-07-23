@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  AgentLearningReportSchema,
   AgentTaskListSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
@@ -27,7 +28,9 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SpecIssueContextSchema,
   SquadListSchema,
+  SquadInstructionsGenerationJobSchema,
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -195,6 +198,34 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
     const { icon: _omit, ...withoutIcon } = baseProperty;
     const parsed = ListPropertiesResponseSchema.parse({ properties: [withoutIcon], total: 1 });
     expect(parsed.properties[0]?.icon).toBe("");
+  });
+});
+
+describe("SpecIssueContextSchema", () => {
+  it("defaults optional issue spec collections", () => {
+    const parsed = SpecIssueContextSchema.parse({
+      issue_id: "11111111-1111-1111-1111-111111111111",
+      metadata: { spec_primary: "module-id" },
+    });
+    expect(parsed.state).toBeNull();
+    expect(parsed.mappings).toEqual([]);
+    expect(parsed.documents).toEqual([]);
+    expect(parsed.metadata).toEqual({ spec_primary: "module-id" });
+  });
+
+  it("defaults issue state arrays", () => {
+    const parsed = SpecIssueContextSchema.parse({
+      issue_id: "11111111-1111-1111-1111-111111111111",
+      state: {
+        id: "state-1",
+        workspace_id: "ws-1",
+        issue_id: "11111111-1111-1111-1111-111111111111",
+      },
+      metadata: {},
+    });
+    expect(parsed.state?.open_questions).toEqual([]);
+    expect(parsed.state?.blockers).toEqual([]);
+    expect(parsed.state?.audit_mode).toBe("required");
   });
 });
 
@@ -438,6 +469,72 @@ describe("CreateFeedbackResponseSchema", () => {
   });
 });
 
+describe("AgentLearningReportSchema", () => {
+  it("parses learning reports with evolution suggestions and applications", () => {
+    const parsed = AgentLearningReportSchema.parse({
+      id: "report-1",
+      workspace_id: "workspace-1",
+      issue_id: "issue-1",
+      task_id: "task-1",
+      agent_id: "agent-1",
+      summary: "The agent learned to update shared schemas.",
+      metadata: { source: "issue_done" },
+      suggestions: [
+        {
+          id: "suggestion-1",
+          report_id: "report-1",
+          workspace_id: "workspace-1",
+          scope: "workspace_skill",
+          risk: "review",
+          status: "applied",
+          target_type: "skill",
+          target_id: "skill-1",
+          title: "Schema coupling",
+          rationale: "Endpoint changes need client schemas.",
+          proposed_content: "Update API schemas with endpoint changes.",
+          metadata: {},
+          applications: [
+            {
+              id: "application-1",
+              suggestion_id: "suggestion-1",
+              workspace_id: "workspace-1",
+              applied_by: "user-1",
+              target_type: "skill",
+              target_id: "skill-1",
+              before_content: "# Skill",
+              after_content: "# Skill\n\n## Agent Evolution",
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          applied_at: "2026-01-01T00:00:00Z",
+          dismissed_at: null,
+        },
+      ],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    expect(parsed.suggestions[0]?.scope).toBe("workspace_skill");
+    expect(parsed.suggestions[0]?.applications[0]?.target_type).toBe("skill");
+  });
+
+  it("defaults additive fields for older or partial responses", () => {
+    const parsed = AgentLearningReportSchema.parse({
+      id: "report-1",
+      workspace_id: "workspace-1",
+      agent_id: "agent-1",
+    });
+
+    expect(parsed.issue_id).toBeNull();
+    expect(parsed.task_id).toBeNull();
+    expect(parsed.summary).toBe("");
+    expect(parsed.metadata).toEqual({});
+    expect(parsed.suggestions).toEqual([]);
+  });
+});
+
 // The duplicate-issue branch in create-issue.tsx feeds ApiError.body
 // (typed as `unknown`) through this schema. Any future server drift that
 // loses the contract MUST fail the parse so the UI falls back to a normal
@@ -572,6 +669,49 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_count).toBe(2);
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
+  });
+
+  it("parses squad instructions generation jobs", () => {
+    const parsed = SquadInstructionsGenerationJobSchema.parse({
+      id: "job-1",
+      job_id: "job-1",
+      task_id: "task-1",
+      status: "completed",
+      mode: "agent_docs",
+      instructions: "## Delegation Strategy\n",
+      error: null,
+      created_at: "2026-05-01T00:00:00Z",
+      updated_at: "2026-05-01T00:01:00Z",
+      completed_at: "2026-05-01T00:01:00Z",
+    });
+    expect(parsed).toMatchObject({
+      id: "job-1",
+      job_id: "job-1",
+      task_id: "task-1",
+      status: "completed",
+      instructions: "## Delegation Strategy\n",
+      error: null,
+    });
+  });
+
+  it("defaults optional squad instructions generation job fields", () => {
+    const parsed = SquadInstructionsGenerationJobSchema.parse({
+      id: "job-2",
+      status: "queued",
+    });
+    expect(parsed.task_id).toBeNull();
+    expect(parsed.mode).toBe("agent_docs");
+    expect(parsed.instructions).toBe("");
+    expect(parsed.error).toBeNull();
+    expect(parsed.completed_at).toBeNull();
+  });
+
+  it("degrades unknown squad instructions generation status to failed", () => {
+    const parsed = SquadInstructionsGenerationJobSchema.parse({
+      id: "job-3",
+      status: "mystery",
+    });
+    expect(parsed.status).toBe("failed");
   });
 });
 

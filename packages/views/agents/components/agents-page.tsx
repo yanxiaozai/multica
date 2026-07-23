@@ -3,28 +3,35 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  Archive,
+  ArchiveRestore,
   Bot,
+  Download,
+  Loader2,
   Lock,
   Plus,
+  X,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { toast } from "sonner";
+import { isClaudeAgentImportSupported } from "../../platform";
 import type {
   Agent,
   AgentRuntime,
+  CreateAgentRequest,
   MemberWithUser,
 } from "@multica/core/types";
 import {
   type AgentActivity,
-  agentRunCounts30dOptions,
   effectiveAccessScope,
+  agentRunCounts30dOptions,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
   VISIBILITY_TOOLTIP,
   type AgentPresenceDetail,
 } from "@multica/core/agents";
 import {
-  type AgentListFilters,
   useAgentsViewStore,
   AGENT_DEFAULT_HIDDEN_COLUMNS,
   AGENT_SCOPES,
@@ -32,16 +39,26 @@ import {
   type AgentsScope,
   type AgentSortField,
 } from "@multica/core/agents/stores";
+import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
   memberListOptions,
+  workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import {
   LIST_GRID_BOTTOM_CLEARANCE,
   ListGrid,
@@ -60,19 +77,13 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import {
-  CollectionPageHeader,
-  CollectionPageHeaderAction,
-  CollectionPageState,
-} from "../../layout/collection-page";
+import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
+import { CreateAgentDialog } from "./create-agent-dialog";
+import { ImportClaudeAgentsDialog } from "./import-claude-agents-dialog";
 import { AgentRowActions } from "./agent-row-actions";
-import {
-  AgentListToolbar,
-  countActiveFilterDimensions,
-} from "./agent-list-toolbar";
+import { AgentListToolbar } from "./agent-list-toolbar";
 import { useT } from "../../i18n";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -97,8 +108,7 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   // idle rows show only the dot + label and leave some in-track slack.
   status: 144,
   owner: 144,
-  // Fits the longest label "Specific people" (~120px incl. padding).
-  access: 132,
+  access: 128,
   runtime: 144,
   lastActive: 120,
   runs: 88,
@@ -107,9 +117,9 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
 };
 
 // Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
-// 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
+// 12 gap-x-3 gaps between the wide template's 13 tracks (zero-width tracks
 // still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
+const FIXED_TRACKS_WIDTH = 268 + 12 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -149,42 +159,22 @@ export interface AgentListRow {
   canManage: boolean;
 }
 
-// Most recent activity bucket with runs, as "days ago" (0 = today).
-// Day-granularity by design — derived from the same 30-day buckets the
-// detail page charts, no extra API.
-function lastActiveDaysAgo(activity: AgentActivity | null): number | null {
-  if (!activity) return null;
-  for (let i = activity.buckets.length - 1; i >= 0; i--) {
-    const bucket = activity.buckets[i];
-    if (bucket && bucket.total > 0) return activity.buckets.length - 1 - i;
-  }
-  return null;
-}
-
-function matchesAgentSearch(row: AgentListRow, query: string): boolean {
-  if (!query) return true;
-  const { agent } = row;
-  return (
-    agent.name.toLowerCase().includes(query) ||
-    matchesPinyin(agent.name, query) ||
-    (agent.description?.toLowerCase().includes(query) ?? false) ||
-    (agent.description ? matchesPinyin(agent.description, query) : false)
-  );
-}
-
-/**
- * Pure row-filter predicate: returns true if the row matches all active
- * filter dimensions. Empty filter arrays are inactive (the row passes). The
- * `access` dimension derives its key via `effectiveAccessScope` so the column
- * and the filter share one derivation. Exported for testing — the page wires
- * it inside its `useMemo`.
- */
 export function rowMatchesFilters(
   row: AgentListRow,
-  filters: AgentListFilters,
-  query: string,
+  filters: import("@multica/core/agents/stores").AgentListFilters,
+  search: string,
 ): boolean {
-  if (!matchesAgentSearch(row, query.trim().toLowerCase())) return false;
+  const q = search.trim().toLowerCase();
+  if (
+    q &&
+    !row.agent.name.toLowerCase().includes(q) &&
+    !row.agent.description.toLowerCase().includes(q) &&
+    !row.agent.model.toLowerCase().includes(q) &&
+    !(row.runtime?.name.toLowerCase().includes(q) ?? false) &&
+    !(row.owner?.name.toLowerCase().includes(q) ?? false)
+  ) {
+    return false;
+  }
   if (
     filters.availability.length > 0 &&
     (!row.presence || !filters.availability.includes(row.presence.availability))
@@ -203,19 +193,13 @@ export function rowMatchesFilters(
   ) {
     return false;
   }
-  if (
-    filters.models.length > 0 &&
-    !filters.models.includes(row.agent.model)
-  ) {
+  if (filters.models.length > 0 && !filters.models.includes(row.agent.model)) {
     return false;
   }
   if (
     filters.access.length > 0 &&
     !filters.access.includes(
-      effectiveAccessScope(
-        row.agent.permission_mode,
-        row.agent.invocation_targets,
-      ),
+      effectiveAccessScope(row.agent.permission_mode, row.agent.invocation_targets),
     )
   ) {
     return false;
@@ -223,15 +207,17 @@ export function rowMatchesFilters(
   return true;
 }
 
-/**
- * Bulk-access dialog confirm-button enablement is centralized in
- * `@multica/core/agents` as `isAccessChangeReady` (MUL-3963). The dialog
- * consumes it; the picker also gates its internal Save button on the same
- * predicate (its own Save button is hidden via `hideFooter` in the bulk flow).
- */
-import { isAccessChangeReady } from "@multica/core/agents";
-import { AgentBatchToolbar } from "./agent-batch-toolbar";
-export { isAccessChangeReady };
+// Most recent activity bucket with runs, as "days ago" (0 = today).
+// Day-granularity by design — derived from the same 30-day buckets the
+// detail page charts, no extra API.
+function lastActiveDaysAgo(activity: AgentActivity | null): number | null {
+  if (!activity) return null;
+  for (let i = activity.buckets.length - 1; i >= 0; i--) {
+    const bucket = activity.buckets[i];
+    if (bucket && bucket.total > 0) return activity.buckets.length - 1 - i;
+  }
+  return null;
+}
 
 export interface AgentsPageProps {
   /** Desktop-only daemon wiring, currently unused by the list (kept for
@@ -249,29 +235,69 @@ export interface AgentsPageProps {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onImport,
+  showImport,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onImport: () => void;
+  showImport: boolean;
 }) {
   const { t } = useT("agents");
   return (
-    <CollectionPageHeader
-      icon={Bot}
-      title={t(($) => $.page.title)}
-      count={totalCount}
-      description={t(($) => $.page.tagline)}
-      learnMore={{
-        href: "https://multica.ai/docs/agents",
-        label: t(($) => $.page.learn_more),
-      }}
-      actions={
-        <CollectionPageHeaderAction
-          icon={Plus}
-          label={t(($) => $.page.new_agent)}
+    <PageHeader className="justify-between px-5">
+      <div className="flex items-center gap-2">
+        <Bot className="h-4 w-4 text-muted-foreground" />
+        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
+        {totalCount > 0 && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+            {totalCount}
+          </span>
+        )}
+        <p className="ml-2 hidden text-xs text-muted-foreground md:block">
+          {t(($) => $.page.tagline)}{" "}
+          <a
+            href="https://multica.ai/docs/agents"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
+          >
+            {t(($) => $.page.learn_more)}
+          </a>
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        {/* Desktop-only: import sub-agents from ~/.claude/agents/. Hidden on
+            web where the file reader bridge isn't available. */}
+        {showImport && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 px-2.5"
+            onClick={onImport}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.import_button.label)}
+            </span>
+          </Button>
+        )}
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.new_agent)}
           onClick={onCreate}
-        />
-      }
-    />
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
+        </Button>
+      </div>
+    </PageHeader>
   );
 }
 
@@ -287,23 +313,28 @@ function ListError({
   const { t } = useT("agents");
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={0} onCreate={onCreate} />
-      <CollectionPageState
-        role="alert"
-        tone="destructive"
-        icon={AlertCircle}
-        title={t(($) => $.page.list_load_failed)}
-        description={
-          listError instanceof Error
-            ? listError.message
-            : t(($) => $.page.list_load_failed_default)
-        }
-        actions={
-          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-            {t(($) => $.page.try_again)}
-          </Button>
-        }
+      <PageHeaderBar
+        totalCount={0}
+        onCreate={onCreate}
+        onImport={() => {}}
+        showImport={false}
       />
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <div>
+          <p className="text-sm font-medium">
+            {t(($) => $.page.list_load_failed)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {listError instanceof Error
+              ? listError.message
+              : t(($) => $.page.list_load_failed_default)}
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          {t(($) => $.page.try_again)}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -311,17 +342,21 @@ function ListError({
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT("agents");
   return (
-    <CollectionPageState
-      icon={Bot}
-      title={t(($) => $.empty.title)}
-      description={t(($) => $.empty.description)}
-      actions={
-        <Button type="button" onClick={onCreate} size="sm">
-          <Plus aria-hidden="true" className="size-3" />
-          {t(($) => $.page.new_agent)}
-        </Button>
-      }
-    />
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+        <Bot className="h-6 w-6 text-muted-foreground" />
+      </div>
+      <h2 className="mt-4 text-base font-semibold">
+        {t(($) => $.empty.title)}
+      </h2>
+      <p className="mt-1 max-w-md text-sm text-muted-foreground">
+        {t(($) => $.empty.description)}
+      </p>
+      <Button type="button" onClick={onCreate} size="sm" className="mt-5">
+        <Plus className="h-3 w-3" />
+        {t(($) => $.page.new_agent)}
+      </Button>
+    </div>
   );
 }
 
@@ -374,7 +409,7 @@ function NameCell({ row }: { row: AgentListRow }) {
         actorType="agent"
         actorId={agent.id}
         size="lg"
-        className={`shrink-0 ${isArchived ? "opacity-50 grayscale" : ""}`}
+        className={`shrink-0 rounded-md ${isArchived ? "opacity-50 grayscale" : ""}`}
         showStatusDot
       />
       <div className="min-w-0 flex-1">
@@ -473,26 +508,18 @@ function OwnerCell({ row }: { row: AgentListRow }) {
   );
 }
 
-// Effective access scope derived from permission_mode + invocation_targets
-// (not the lossy derived `visibility`). Text label, not icon-only, so screen
-// readers announce the scope.
 export function AccessCell({ row }: { row: AgentListRow }) {
   const { t } = useT("agents");
-  const scope = useMemo(
-    () =>
-      effectiveAccessScope(
-        row.agent.permission_mode,
-        row.agent.invocation_targets,
-      ),
-    [row.agent.permission_mode, row.agent.invocation_targets],
+  const scope = effectiveAccessScope(
+    row.agent.permission_mode,
+    row.agent.invocation_targets,
   );
-  const label = t(($) =>
+  const label =
     scope === "workspace"
-      ? $.access.scope_labels.workspace
+      ? t(($) => $.access.scope_labels.workspace)
       : scope === "specific-people"
-        ? $.access.scope_labels.specific_people
-        : $.access.scope_labels.owner_only,
-  );
+        ? t(($) => $.access.scope_labels.specific_people)
+        : t(($) => $.access.scope_labels.owner_only);
   return (
     <ListGridCell className="hidden @2xl:flex">
       <span className="min-w-0 truncate text-xs text-muted-foreground">
@@ -508,7 +535,7 @@ function RuntimeCell({ row }: { row: AgentListRow }) {
     <ListGridCell className="hidden @2xl:flex">
       {runtime ? (
         <span className="min-w-0 truncate text-xs text-muted-foreground">
-          {runtimeDisplayLabel(runtime)}
+          {runtime.name}
         </span>
       ) : (
         <span className="text-xs text-muted-foreground/40">—</span>
@@ -684,9 +711,6 @@ function LoadingSkeleton() {
           <Skeleton className="h-3 w-14" />
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden @2xl:flex">
-          <Skeleton className="h-3 w-14" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell className="hidden @2xl:flex">
           <Skeleton className="h-3 w-10" />
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
@@ -697,7 +721,7 @@ function LoadingSkeleton() {
         <ListGridRow key={i} className="h-16 hover:bg-transparent">
           <span aria-hidden="true" className="hidden @2xl:inline" />
           <ListGridCell className="gap-3">
-            <Skeleton className="size-8 rounded-full" />
+            <Skeleton className="size-8 rounded-md" />
             <div className="min-w-0 flex-1 space-y-1.5">
               <Skeleton className="h-3.5 w-32 max-w-full" />
               <Skeleton className="h-3 w-48 max-w-full" />
@@ -709,9 +733,6 @@ function LoadingSkeleton() {
           <ListGridCell className="hidden gap-1.5 @2xl:flex">
             <Skeleton className="size-5 rounded-full" />
             <Skeleton className="h-3 w-12" />
-          </ListGridCell>
-          <ListGridCell className="hidden @2xl:flex">
-            <Skeleton className="h-3 w-14" />
           </ListGridCell>
           <ListGridCell className="hidden @2xl:flex">
             <Skeleton className="h-3 w-16" />
@@ -733,6 +754,148 @@ function LoadingSkeleton() {
 
 // ---------------------------------------------------------------------------
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
+// restore, mirroring the single-row actions. No delete: the API has none.
+// ---------------------------------------------------------------------------
+
+function AgentBatchToolbar({
+  rows,
+  onClear,
+}: {
+  rows: AgentListRow[];
+  onClear: () => void;
+}) {
+  const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (rows.length === 0) return null;
+
+  const allManageable = rows.every((r) => r.canManage);
+  const anyActive = rows.some((r) => !r.agent.archived_at);
+  const anyArchived = rows.some((r) => !!r.agent.archived_at);
+
+  const invalidate = () =>
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+
+  const runBatch = async (
+    fn: (id: string) => Promise<unknown>,
+    targets: AgentListRow[],
+  ) => {
+    setBusy(true);
+    try {
+      for (const row of targets) {
+        await fn(row.agent.id);
+      }
+      invalidate();
+      onClear();
+    } catch (e) {
+      invalidate();
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Anchored to the page root (relative), NOT the viewport. */}
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
+          <span className="text-sm font-medium">
+            {t(($) => $.actions.selected, { count: rows.length })}
+          </span>
+          <button
+            type="button"
+            aria-label={t(($) => $.actions.clear_selection)}
+            onClick={onClear}
+            className="rounded p-0.5 transition-colors hover:bg-accent"
+          >
+            <X className="size-3.5 text-muted-foreground" />
+          </button>
+        </div>
+
+        {anyActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!allManageable || busy}
+            onClick={() => setConfirmArchive(true)}
+          >
+            <Archive className="mr-1 size-3.5" />
+            {t(($) => $.row_actions.archive)}
+          </Button>
+        )}
+        {anyArchived && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!allManageable || busy}
+            onClick={() =>
+              runBatch(
+                (id) => api.restoreAgent(id),
+                rows.filter((r) => !!r.agent.archived_at),
+              )
+            }
+          >
+            <ArchiveRestore className="mr-1 size-3.5" />
+            {t(($) => $.row_actions.restore)}
+          </Button>
+        )}
+      </div>
+
+      <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {t(($) => $.row_actions.archive_dialog_title, {
+                name:
+                  rows.length === 1 && rows[0]
+                    ? rows[0].agent.name
+                    : String(rows.length),
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {t(($) => $.row_actions.archive_dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmArchive(false)}
+            >
+              {t(($) => $.row_actions.archive_dialog_cancel)}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                await runBatch(
+                  (id) => api.archiveAgent(id),
+                  rows.filter((r) => !r.agent.archived_at),
+                );
+                setConfirmArchive(false);
+              }}
+            >
+              {busy ? (
+                <Loader2 className="mr-1 size-3.5 animate-spin" />
+              ) : null}
+              {t(($) => $.row_actions.archive_dialog_confirm)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -742,6 +905,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const rowLink = useRowLink();
+  const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
 
   const {
@@ -750,18 +914,23 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [] } = useQuery(
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: runCountsRaw = [], isPending: runCountsPending } = useQuery(
-    agentRunCounts30dOptions(wsId),
-  );
-  const { byAgent: presenceMap, loading: presenceLoading } =
-    useWorkspacePresenceMap(wsId);
-  const { byAgent: activityMap, loading: activityLoading } =
-    useWorkspaceActivityMap(wsId);
+  const { data: runCountsRaw = [] } = useQuery(agentRunCounts30dOptions(wsId));
+  const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
+  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
+  // Desktop-only affordance: the file reader for ~/.claude/agents/ only exists
+  // in the Electron preload. Web renders never show the import button.
+  const claudeImportSupported = isClaudeAgentImportSupported();
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
+    null,
+  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -903,25 +1072,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, search, filters, sortField, sortDirection]);
-
-  const noMatchText = useMemo(() => {
-    const query = search.trim();
-    if (query) {
-      if (scope === "archived") {
-        return t(($) => $.no_matches.search_archived, { query });
-      }
-      if (countActiveFilterDimensions(filters) > 0) {
-        return t(($) => $.no_matches.search_active_filtered, { query });
-      }
-      return t(($) => $.no_matches.search_active, { query });
-    }
-    if (scope === "archived") return t(($) => $.no_matches.no_archived);
-    if (countActiveFilterDimensions(filters) > 0) {
-      return t(($) => $.no_matches.no_filter_match);
-    }
-    return t(($) => $.no_matches.title);
-  }, [filters, scope, search, t]);
+  }, [scopeRows, filters, search, sortField, sortDirection]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer
@@ -939,9 +1090,25 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     overscan: 10,
   });
 
+  const handleCreate = async (data: CreateAgentRequest): Promise<Agent> => {
+    const agent = await api.createAgent(data);
+    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === agent.id);
+      return exists
+        ? current.map((a) => (a.id === agent.id ? agent : a))
+        : [...current, agent];
+    });
+    setShowCreate(false);
+    setDuplicateTemplate(null);
+    navigation.push(paths.agentDetail(agent.id));
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    return agent;
+  };
+
   const handleDuplicate = useCallback((agent: Agent) => {
-    navigation.push(`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`);
-  }, [navigation, paths]);
+    setDuplicateTemplate(agent);
+    setShowCreate(true);
+  }, []);
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
@@ -965,7 +1132,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   if (listError) {
     return (
       <ListError
-        onCreate={() => navigation.push(paths.newAgent())}
+        onCreate={() => setShowCreate(true)}
         listError={listError}
         onRetry={() => refetchList()}
       />
@@ -975,43 +1142,24 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const totalCount = agents.filter((a) => !a.archived_at).length;
   const showEmpty = !isLoading && agents.length === 0;
 
-  // The active sort field / availability filter reads columns that arrive in
-  // separate queries from the main agent list (activity → lastActiveDays,
-  // run-counts → runCount, presence → availability). Rendering real rows
-  // before those land would sort on placeholder values (lastActiveDays
-  // null→Infinity, runCount 0) and visibly re-order the list once each query
-  // resolves. Gate the first real paint on exactly the auxiliary queries the
-  // current sort / filter depends on — nothing for name/created, run-counts
-  // for runs, activity + run-counts (its tiebreaker) for the default
-  // lastActive, plus presence whenever an availability filter is active. The
-  // queries still run in parallel, so this defers the first paint by at most
-  // one extra round-trip (shown as skeleton) and never serialises them. An
-  // empty workspace (showEmpty) skips the gate so the empty state is never
-  // blocked on the auxiliary queries.
-  const needsRunCounts = sortField === "lastActive" || sortField === "runs";
-  const needsActivity = sortField === "lastActive";
-  const needsPresence = filters.availability.length > 0;
-  const listReady =
-    (!needsActivity || !activityLoading) &&
-    (!needsRunCounts || !runCountsPending) &&
-    (!needsPresence || !presenceLoading);
-
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
     // not viewport-centered).
     <div className="relative flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalCount}
-        onCreate={() => navigation.push(paths.newAgent())}
+        onCreate={() => setShowCreate(true)}
+        onImport={() => setShowImport(true)}
+        showImport={claudeImportSupported}
       />
 
-      {isLoading || (!showEmpty && !listReady) ? (
+      {isLoading ? (
         <div className="flex-1 overflow-y-auto @container">
           <LoadingSkeleton />
         </div>
       ) : showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
+          <EmptyState onCreate={() => setShowCreate(true)} />
         </div>
       ) : (
         <>
@@ -1060,7 +1208,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               >
                 {rows.length === 0 && (
                   <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
-                    {noMatchText}
+                    {t(($) => $.no_matches.title)}
                   </div>
                 )}
                 {virtualItems.map((vi) => {
@@ -1153,11 +1301,33 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
       <AgentBatchToolbar
         rows={selectedRows}
-        members={members}
-        currentUserId={currentUser?.id ?? null}
         onClear={() => setSelectedIds(new Set())}
       />
 
+      {showCreate && (
+        <CreateAgentDialog
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          template={duplicateTemplate}
+          onClose={() => {
+            setShowCreate(false);
+            setDuplicateTemplate(null);
+          }}
+          onCreate={handleCreate}
+        />
+      )}
+
+      {showImport && (
+        <ImportClaudeAgentsDialog
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          onClose={() => setShowImport(false)}
+        />
+      )}
     </div>
   );
 }
